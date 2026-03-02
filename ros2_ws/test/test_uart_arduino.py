@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 """
-test_uart_arduino.py - UART TLV Communication Test for Raspberry Pi
+test_uart_arduino.py - UART TLV v2.0 Communication Test
 
-This script tests the TLV protocol communication between Raspberry Pi and Arduino
-via UART (Serial2 @ 921600 baud on pins 16/17).
+Pairs with firmware/tests/test_uart_tlv/test_uart_tlv.ino running on the Arduino.
 
 Usage:
-    python3 test_uart_arduino.py [--port /dev/ttyAMA0] [--baud 921600]
+    python3 test_uart_arduino.py [--port /dev/ttyAMA0] [--baud 1000000]
 
-Features:
-- Sends periodic heartbeat to Arduino
-- Receives and decodes Arduino responses (system status, sensor data)
-- Interactive commands to test motor control
-- Automatic message display and logging
+Hardware setup:
+    - Arduino Serial2 (pin 16 TX2, pin 17 RX2) → level shifter → RPi /dev/ttyAMA0
+    - Arduino Serial0 (USB) shows debug output; use a second terminal to monitor it
+    - Alternatively: connect pin 16 → 17 for loopback (Arduino receives own TX)
+
+State machine commands sent by this script:
+    start  → SYS_CMD_START  (IDLE → RUNNING, enables full telemetry)
+    stop   → SYS_CMD_STOP   (RUNNING → IDLE)
+    estop  → SYS_CMD_ESTOP  (any → ESTOP)
+    reset  → SYS_CMD_RESET  (ESTOP/ERROR → IDLE)
 
 Requirements:
     pip3 install pyserial
@@ -23,17 +27,18 @@ Developed for MAE 162 Educational Robotics Platform (Winter/Spring 2026)
 import sys
 import time
 import argparse
-import struct
 import ctypes
+import math
 from typing import Optional
-
-# Add tlvcodec to path
 
 try:
     import serial
 except ImportError:
     print("ERROR: pyserial not installed. Run: pip3 install pyserial")
     sys.exit(1)
+
+# Add the src directory to path so we can import the codec and type defs
+sys.path.insert(0, '/Users/toby/Projects/Project-NUEVO/ros2_ws/src')
 
 from tlvcodec.src.encoder import Encoder
 from tlvcodec.src.decoder import Decoder, DecodeErrorCode
@@ -43,80 +48,272 @@ from TLV_TypeDefs import *
 # CONFIGURATION
 # ============================================================================
 
-DEFAULT_PORT = '/dev/ttyAMA0'  # Raspberry Pi serial port (GPIO 14/15)
-DEFAULT_BAUD = 500000  # Baud rate
-DEVICE_ID = 0x01  # RPi device ID
-HEARTBEAT_INTERVAL = 0.2  # Send heartbeat every 10 ms
-ENABLE_CRC_CHECK = True  # Enable CRC checking
+DEFAULT_PORT = '/dev/ttyAMA0'   # Raspberry Pi UART (GPIO 14/15 = Serial0)
+DEFAULT_BAUD = 1000000          # Must match RPI_BAUD_RATE in config.h (1 Mbps)
+DEVICE_ID    = 0x01             # RPi device ID
+HEARTBEAT_INTERVAL = 0.2        # Heartbeat period (seconds); Arduino timeout = 500 ms
+ENABLE_CRC   = True
 
 # ============================================================================
-# TLV PAYLOAD STRUCTURES (matching Arduino implementation)
+# PAYLOAD STRUCTS  (must match TLV_Payloads.h exactly — same field order/types)
 # ============================================================================
+
+# ---------- System ----------
 
 class PayloadHeartbeat(ctypes.Structure):
     _pack_ = 1
     _fields_ = [
-        ("timestamp", ctypes.c_uint32),
-        ("flags", ctypes.c_uint8),
+        ("timestamp", ctypes.c_uint32),   # RPi milliseconds since boot
+        ("flags",     ctypes.c_uint8),    # Reserved — set 0
     ]
+# 5 bytes
+
+class PayloadSysCmd(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("command",  ctypes.c_uint8),     # SysCmdType: 1=START 2=STOP 3=RESET 4=ESTOP
+        ("reserved", ctypes.c_uint8 * 3),
+    ]
+# 4 bytes
 
 class PayloadSystemStatus(ctypes.Structure):
     _pack_ = 1
     _fields_ = [
-        ("uptimeMs", ctypes.c_uint32),
-        ("lastHeartbeatMs", ctypes.c_uint32),
-        ("batteryMv", ctypes.c_uint16),
-        ("rail5vMv", ctypes.c_uint16),
-        ("servoRailMv", ctypes.c_uint16),
-        ("errorFlags", ctypes.c_uint8),
-        ("motorEnableMask", ctypes.c_uint8),
-        ("stepperEnableMask", ctypes.c_uint8),
-        ("reserved", ctypes.c_uint8),
+        ("firmwareMajor",       ctypes.c_uint8),
+        ("firmwareMinor",       ctypes.c_uint8),
+        ("firmwarePatch",       ctypes.c_uint8),
+        ("state",               ctypes.c_uint8),    # SystemState enum
+        ("uptimeMs",            ctypes.c_uint32),
+        ("lastRxMs",            ctypes.c_uint32),   # ms since last TLV from RPi
+        ("lastCmdMs",           ctypes.c_uint32),   # ms since last non-heartbeat cmd
+        ("batteryMv",           ctypes.c_uint16),
+        ("rail5vMv",            ctypes.c_uint16),
+        ("errorFlags",          ctypes.c_uint8),    # SystemErrorFlags bitmask
+        ("attachedSensors",     ctypes.c_uint8),    # bit0=IMU, bit1=Lidar, bit2=US
+        ("freeSram",            ctypes.c_uint16),
+        ("loopTimeAvgUs",       ctypes.c_uint16),
+        ("loopTimeMaxUs",       ctypes.c_uint16),
+        ("uartRxErrors",        ctypes.c_uint16),
+        ("wheelDiameterMm",     ctypes.c_float),
+        ("wheelBaseMm",         ctypes.c_float),
+        ("motorDirMask",        ctypes.c_uint8),
+        ("neoPixelCount",       ctypes.c_uint8),
+        ("heartbeatTimeoutMs",  ctypes.c_uint16),
+        ("limitSwitchMask",     ctypes.c_uint16),
+        ("stepperHomeLimitGpio",ctypes.c_uint8 * 4),
     ]
+# 48 bytes
 
-class PayloadSensorVoltage(ctypes.Structure):
-    _pack_ = 1
-    _fields_ = [
-        ("batteryMv", ctypes.c_uint16),
-        ("rail5vMv", ctypes.c_uint16),
-        ("servoRailMv", ctypes.c_uint16),
-        ("reserved", ctypes.c_uint16),
-    ]
+assert ctypes.sizeof(PayloadSystemStatus) == 48, \
+    f"PayloadSystemStatus size wrong: {ctypes.sizeof(PayloadSystemStatus)}"
 
-class PayloadSensorEncoder(ctypes.Structure):
-    _pack_ = 1
-    _fields_ = [
-        ("position", ctypes.c_int32 * 4),
-        ("velocity", ctypes.c_int32 * 4),
-        ("timestamp", ctypes.c_uint32),
-    ]
+# SystemState values
+SYS_STATE_NAMES = {0: "INIT", 1: "IDLE", 2: "RUNNING", 3: "ERROR", 4: "ESTOP"}
+
+# ErrorFlags bitmask
+ERROR_FLAGS = {
+    0x01: "UNDERVOLTAGE",
+    0x02: "OVERVOLTAGE",
+    0x04: "ENCODER_FAIL",
+    0x08: "I2C_ERROR",
+    0x10: "IMU_ERROR",
+    0x20: "LIVENESS_LOST",
+    0x40: "LOOP_OVERRUN",
+}
+
+# ---------- DC Motors ----------
 
 class PayloadDCEnable(ctypes.Structure):
     _pack_ = 1
     _fields_ = [
-        ("motorId", ctypes.c_uint8),
-        ("enable", ctypes.c_uint8),
-        ("mode", ctypes.c_uint8),
-        ("reserved", ctypes.c_uint8),
+        ("motorId",  ctypes.c_uint8),   # Motor index 0–3
+        ("mode",     ctypes.c_uint8),   # 0=disable 1=position 2=velocity 3=pwm
+        ("reserved", ctypes.c_uint8 * 2),
     ]
+# 4 bytes
 
 class PayloadDCSetVelocity(ctypes.Structure):
     _pack_ = 1
     _fields_ = [
-        ("motorId", ctypes.c_uint8),
-        ("reserved", ctypes.c_uint8 * 3),
-        ("targetVel", ctypes.c_int32),
-        ("maxAccel", ctypes.c_int32),
+        ("motorId",     ctypes.c_uint8),
+        ("reserved",    ctypes.c_uint8 * 3),
+        ("targetTicks", ctypes.c_int32),    # Target velocity (ticks/sec)
     ]
+# 8 bytes
+
+class PayloadDCSetPWM(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("motorId",  ctypes.c_uint8),
+        ("reserved", ctypes.c_uint8),
+        ("pwm",      ctypes.c_int16),   # -255 to +255
+    ]
+# 4 bytes
+
+class DCMotorStatus(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("mode",       ctypes.c_uint8),   # DCMotorMode
+        ("faultFlags", ctypes.c_uint8),   # bit0=overcurrent, bit1=stall
+        ("position",   ctypes.c_int32),   # Current position (ticks)
+        ("velocity",   ctypes.c_int32),   # Current velocity (ticks/sec)
+        ("targetPos",  ctypes.c_int32),
+        ("targetVel",  ctypes.c_int32),
+        ("pwmOutput",  ctypes.c_int16),
+        ("currentMa",  ctypes.c_int16),   # -1 if not measured
+        ("posKp",      ctypes.c_float),
+        ("posKi",      ctypes.c_float),
+        ("posKd",      ctypes.c_float),
+        ("velKp",      ctypes.c_float),
+        ("velKi",      ctypes.c_float),
+        ("velKd",      ctypes.c_float),
+    ]
+# 46 bytes
+
+assert ctypes.sizeof(DCMotorStatus) == 46, \
+    f"DCMotorStatus size wrong: {ctypes.sizeof(DCMotorStatus)}"
+
+class PayloadDCStatusAll(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [("motors", DCMotorStatus * 4)]
+# 184 bytes
+
+DC_MODE_NAMES = {0: "DISABLED", 1: "POSITION", 2: "VELOCITY", 3: "PWM"}
+
+# ---------- Steppers ----------
+
+class StepperStatus(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("enabled",        ctypes.c_uint8),
+        ("motionState",    ctypes.c_uint8),  # 0=IDLE 1=ACCEL 2=CRUISE 3=DECEL 4=HOMING 5=FAULT
+        ("limitHit",       ctypes.c_uint8),
+        ("reserved",       ctypes.c_uint8),
+        ("commandedCount", ctypes.c_int32),
+        ("targetCount",    ctypes.c_int32),
+        ("currentSpeed",   ctypes.c_uint32),
+        ("maxSpeed",       ctypes.c_uint32),
+        ("acceleration",   ctypes.c_uint32),
+    ]
+# 24 bytes
+
+assert ctypes.sizeof(StepperStatus) == 24, \
+    f"StepperStatus size wrong: {ctypes.sizeof(StepperStatus)}"
+
+class PayloadStepStatusAll(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [("steppers", StepperStatus * 4)]
+# 96 bytes
+
+STEPPER_STATE_NAMES = {0: "IDLE", 1: "ACCEL", 2: "CRUISE", 3: "DECEL", 4: "HOMING", 5: "FAULT"}
+
+# ---------- Servos ----------
+
+class PayloadServoEnable(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("channel",  ctypes.c_uint8),   # 0–15; 0xFF = all
+        ("enable",   ctypes.c_uint8),
+        ("reserved", ctypes.c_uint8 * 2),
+    ]
+# 4 bytes
+
+class PayloadServoSetSingle(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("channel", ctypes.c_uint8),
+        ("count",   ctypes.c_uint8),    # 1 for single
+        ("pulseUs", ctypes.c_uint16),
+    ]
+# 4 bytes
+
+class PayloadServoStatusAll(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("pca9685Connected", ctypes.c_uint8),
+        ("pca9685Error",     ctypes.c_uint8),
+        ("enabledMask",      ctypes.c_uint16),
+        ("pulseUs",          ctypes.c_uint16 * 16),
+    ]
+# 36 bytes
+
+assert ctypes.sizeof(PayloadServoStatusAll) == 36, \
+    f"PayloadServoStatusAll size wrong: {ctypes.sizeof(PayloadServoStatusAll)}"
+
+# ---------- Sensors ----------
+
+class PayloadSensorVoltage(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("batteryMv",   ctypes.c_uint16),
+        ("rail5vMv",    ctypes.c_uint16),
+        ("servoRailMv", ctypes.c_uint16),
+        ("reserved",    ctypes.c_uint16),
+    ]
+# 8 bytes
+
+class PayloadSensorIMU(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("quatW",        ctypes.c_float),
+        ("quatX",        ctypes.c_float),
+        ("quatY",        ctypes.c_float),
+        ("quatZ",        ctypes.c_float),
+        ("earthAccX",    ctypes.c_float),
+        ("earthAccY",    ctypes.c_float),
+        ("earthAccZ",    ctypes.c_float),
+        ("rawAccX",      ctypes.c_int16),
+        ("rawAccY",      ctypes.c_int16),
+        ("rawAccZ",      ctypes.c_int16),
+        ("rawGyroX",     ctypes.c_int16),
+        ("rawGyroY",     ctypes.c_int16),
+        ("rawGyroZ",     ctypes.c_int16),
+        ("magX",         ctypes.c_int16),
+        ("magY",         ctypes.c_int16),
+        ("magZ",         ctypes.c_int16),
+        ("magCalibrated",ctypes.c_uint8),
+        ("reserved",     ctypes.c_uint8),
+        ("timestamp",    ctypes.c_uint32),
+    ]
+# 52 bytes
+
+assert ctypes.sizeof(PayloadSensorIMU) == 52, \
+    f"PayloadSensorIMU size wrong: {ctypes.sizeof(PayloadSensorIMU)}"
+
+class PayloadSensorKinematics(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("x",         ctypes.c_float),
+        ("y",         ctypes.c_float),
+        ("theta",     ctypes.c_float),
+        ("vx",        ctypes.c_float),
+        ("vy",        ctypes.c_float),
+        ("vTheta",    ctypes.c_float),
+        ("timestamp", ctypes.c_uint32),
+    ]
+# 28 bytes
+
+class PayloadIOStatus(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("buttonMask",     ctypes.c_uint16),
+        ("ledBrightness",  ctypes.c_uint8 * 3),
+        ("reserved",       ctypes.c_uint8),
+        ("timestamp",      ctypes.c_uint32),
+    ]
+# 10 bytes fixed (+ 3 × neoPixelCount appended)
+
+# ---------- NeoPixel ----------
 
 class PayloadSetNeoPixel(ctypes.Structure):
     _pack_ = 1
     _fields_ = [
         ("index", ctypes.c_uint8),
-        ("red", ctypes.c_uint8),
+        ("red",   ctypes.c_uint8),
         ("green", ctypes.c_uint8),
-        ("blue", ctypes.c_uint8),
+        ("blue",  ctypes.c_uint8),
     ]
+# 4 bytes
 
 # ============================================================================
 # UART TEST CLASS
@@ -124,255 +321,354 @@ class PayloadSetNeoPixel(ctypes.Structure):
 
 class UARTTest:
     def __init__(self, port: str, baudrate: int):
-        self.port = port
+        self.port     = port
         self.baudrate = baudrate
         self.ser: Optional[serial.Serial] = None
-        self.encoder = Encoder(deviceId=DEVICE_ID, bufferSize=4096, crc=ENABLE_CRC_CHECK)
-        self.decoder = Decoder(callback=self.decode_callback, crc=ENABLE_CRC_CHECK)
+        self.encoder  = Encoder(deviceId=DEVICE_ID, bufferSize=4096, crc=ENABLE_CRC)
+        self.decoder  = Decoder(callback=self.decode_callback, crc=ENABLE_CRC)
 
-        self.running = True
+        self.running            = True
         self.last_heartbeat_time = 0
-        self.message_count = 0
-        self.heartbeat_count = 0
 
-        # Statistics
         self.stats = {
-            'heartbeats_sent': 0,
-            'messages_received': 0,
-            'system_status_count': 0,
-            'voltage_count': 0,
-            'encoder_count': 0,
-            'decode_errors': 0,
-            'decode_errors_by_type': {},  # Track errors by error code type
+            'heartbeats_sent':    0,
+            'frames_received':    0,
+            'decode_errors':      0,
+            'decode_errors_by_type': {},
+            'by_type':            {},   # counts per TLV type name
         }
 
+    # ---- Connection ----
+
     def connect(self) -> bool:
-        """Open serial connection to Arduino"""
         try:
             print(f"[UART] Opening {self.port} @ {self.baudrate} baud...")
             self.ser = serial.Serial(
-                port=self.port,
-                baudrate=self.baudrate,
-                bytesize=serial.EIGHTBITS,
-                parity=serial.PARITY_NONE,
-                stopbits=serial.STOPBITS_ONE,
-                timeout=0.1  # Non-blocking with short timeout
+                port=self.port, baudrate=self.baudrate,
+                bytesize=serial.EIGHTBITS, parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE, timeout=0.1
             )
-            print(f"[UART] Connected successfully")
+            print(f"[UART] Connected")
             return True
         except serial.SerialException as e:
-            print(f"[UART] ERROR: Failed to open {self.port}: {e}")
+            print(f"[UART] ERROR: {e}")
             return False
 
     def disconnect(self):
-        """Close serial connection"""
         if self.ser and self.ser.is_open:
             self.ser.close()
             print("[UART] Disconnected")
 
+    # ---- TX helpers ----
+
+    def _send(self, tlv_type: int, payload):
+        self.encoder.reset()
+        self.encoder.addPacket(tlv_type, ctypes.sizeof(payload), payload)
+        length, buffer = self.encoder.wrapupBuffer()
+        self.ser.write(buffer[:length])
+
     def send_heartbeat(self):
-        """Send SYS_HEARTBEAT to Arduino"""
-        payload = PayloadHeartbeat()
-        payload.timestamp = int(time.time() * 1000) & 0xFFFFFFFF
-        payload.flags = 0  # No emergency stop
-
-        self.encoder.reset()
-        self.encoder.addPacket(SYS_HEARTBEAT, ctypes.sizeof(payload), payload)
-        length, buffer = self.encoder.wrapupBuffer()
-
-        self.ser.write(buffer[:length])
+        p = PayloadHeartbeat()
+        p.timestamp = int(time.time() * 1000) & 0xFFFFFFFF
+        p.flags = 0
+        self._send(SYS_HEARTBEAT, p)
         self.stats['heartbeats_sent'] += 1
-        self.heartbeat_count += 1
 
-        # print(f"[TX] Heartbeat #{self.heartbeat_count} sent ({length} bytes)")
+    def send_sys_cmd(self, cmd: int):
+        """Send SYS_CMD: 1=START  2=STOP  3=RESET  4=ESTOP"""
+        p = PayloadSysCmd()
+        p.command = cmd
+        self._send(SYS_CMD, p)
+        names = {1: "START", 2: "STOP", 3: "RESET", 4: "ESTOP"}
+        print(f"[TX] SYS_CMD_{names.get(cmd, cmd)}")
 
-    def send_dc_enable(self, motor_id: int, enable: bool, mode: int = 2):
-        """Send DC_ENABLE command"""
-        payload = PayloadDCEnable()
-        payload.motorId = motor_id
-        payload.enable = 1 if enable else 0
-        payload.mode = mode  # 0=disabled, 1=position, 2=velocity
-        payload.reserved = 0
+    def send_dc_enable(self, motor_id: int, mode: int):
+        """mode: 0=disable 1=position 2=velocity 3=pwm"""
+        p = PayloadDCEnable()
+        p.motorId = motor_id
+        p.mode    = mode
+        self._send(DC_ENABLE, p)
+        print(f"[TX] DC_ENABLE: Motor {motor_id}, mode={DC_MODE_NAMES.get(mode, mode)}")
 
-        self.encoder.reset()
-        self.encoder.addPacket(DC_ENABLE, ctypes.sizeof(payload), payload)
-        length, buffer = self.encoder.wrapupBuffer()
+    def send_dc_velocity(self, motor_id: int, ticks_per_sec: int):
+        p = PayloadDCSetVelocity()
+        p.motorId     = motor_id
+        p.targetTicks = ticks_per_sec
+        self._send(DC_SET_VELOCITY, p)
+        print(f"[TX] DC_SET_VELOCITY: Motor {motor_id}, {ticks_per_sec} ticks/s")
 
-        self.ser.write(buffer[:length])
-        print(f"[TX] DC_ENABLE: Motor {motor_id}, Enable={enable}, Mode={mode} ({length} bytes)")
+    def send_dc_pwm(self, motor_id: int, pwm: int):
+        """pwm: -255 to +255"""
+        p = PayloadDCSetPWM()
+        p.motorId = motor_id
+        p.pwm     = max(-255, min(255, pwm))
+        self._send(DC_SET_PWM, p)
+        print(f"[TX] DC_SET_PWM: Motor {motor_id}, pwm={pwm}")
 
-    def send_dc_velocity(self, motor_id: int, velocity: int):
-        """Send DC_SET_VELOCITY command"""
-        payload = PayloadDCSetVelocity()
-        payload.motorId = motor_id
-        payload.targetVel = velocity
-        payload.maxAccel = 0  # No acceleration limit
+    def send_servo_enable(self, channel: int, enable: bool):
+        p = PayloadServoEnable()
+        p.channel = channel
+        p.enable  = 1 if enable else 0
+        self._send(SERVO_ENABLE, p)
+        print(f"[TX] SERVO_ENABLE: Ch {channel}, enable={enable}")
 
-        self.encoder.reset()
-        self.encoder.addPacket(DC_SET_VELOCITY, ctypes.sizeof(payload), payload)
-        length, buffer = self.encoder.wrapupBuffer()
-
-        self.ser.write(buffer[:length])
-        print(f"[TX] DC_SET_VELOCITY: Motor {motor_id}, Velocity={velocity} ({length} bytes)")
+    def send_servo_set(self, channel: int, pulse_us: int):
+        p = PayloadServoSetSingle()
+        p.channel = channel
+        p.count   = 1
+        p.pulseUs = pulse_us
+        self._send(SERVO_SET, p)
+        print(f"[TX] SERVO_SET: Ch {channel}, {pulse_us} µs")
 
     def send_neopixel(self, index: int, r: int, g: int, b: int):
-        """Send IO_SET_NEOPIXEL command"""
-        payload = PayloadSetNeoPixel()
-        payload.index = index
-        payload.red = r
-        payload.green = g
-        payload.blue = b
+        p = PayloadSetNeoPixel()
+        p.index = index
+        p.red   = r
+        p.green = g
+        p.blue  = b
+        self._send(IO_SET_NEOPIXEL, p)
+        print(f"[TX] IO_SET_NEOPIXEL: index={index}, RGB=({r},{g},{b})")
 
-        self.encoder.reset()
-        self.encoder.addPacket(IO_SET_NEOPIXEL, ctypes.sizeof(payload), payload)
-        length, buffer = self.encoder.wrapupBuffer()
-
-        self.ser.write(buffer[:length])
-        print(f"[TX] IO_SET_NEOPIXEL: Index={index}, RGB=({r},{g},{b}) ({length} bytes)")
-
-    def decode_callback(self, error_code, frame_header, tlv_list):
-        """Callback for decoded TLV messages from Arduino"""
-        if error_code != DecodeErrorCode.NoError:
-            print(f"[RX] Decode error: {error_code}")
-            self.stats['decode_errors'] += 1
-            # Track errors by type
-            error_name = error_code.name if hasattr(error_code, 'name') else str(error_code)
-            if error_name not in self.stats['decode_errors_by_type']:
-                self.stats['decode_errors_by_type'][error_name] = 0
-            self.stats['decode_errors_by_type'][error_name] += 1
-            return
-
-        self.stats['messages_received'] += 1
-
-        print(f"[RX] Frame from device 0x{frame_header.deviceId:02X}, "
-              f"frame #{frame_header.frameNum}, {frame_header.numTlvs} TLVs"
-              f"; total decode error counts: {self.stats['decode_errors']}")
-
-        for tlv_type, tlv_len, tlv_data in tlv_list:
-            self.handle_tlv(tlv_type, tlv_len, tlv_data)
-
-    def handle_tlv(self, tlv_type: int, tlv_len: int, tlv_data: bytes):
-        """Handle individual TLV message"""
-
-        if tlv_type == SYS_STATUS:
-            self.stats['system_status_count'] += 1
-            if tlv_len == ctypes.sizeof(PayloadSystemStatus):
-                status = PayloadSystemStatus.from_buffer_copy(tlv_data)
-                print(f"  [SYS_STATUS]")
-                print(f"    Uptime: {status.uptimeMs / 1000:.1f}s")
-                print(f"    Last heartbeat: {status.lastHeartbeatMs}ms ago")
-                print(f"    Battery: {status.batteryMv}mV")
-                print(f"    5V rail: {status.rail5vMv}mV")
-                print(f"    Servo rail: {status.servoRailMv}mV")
-                print(f"    Error flags: 0x{status.errorFlags:02X}")
-                print(f"    Motor enable mask: 0x{status.motorEnableMask:02X}")
-            else:
-                print(f"  [SYS_STATUS] Size mismatch: expected {ctypes.sizeof(PayloadSystemStatus)}, got {tlv_len}")
-
-        elif tlv_type == SENSOR_VOLTAGE:
-            self.stats['voltage_count'] += 1
-            if tlv_len == ctypes.sizeof(PayloadSensorVoltage):
-                voltage = PayloadSensorVoltage.from_buffer_copy(tlv_data)
-                print(f"  [SENSOR_VOLTAGE]")
-                print(f"    Battery: {voltage.batteryMv}mV")
-                print(f"    5V rail: {voltage.rail5vMv}mV")
-                print(f"    Servo rail: {voltage.servoRailMv}mV")
-            else:
-                print(f"  [SENSOR_VOLTAGE] Size mismatch")
-
-        elif tlv_type == SENSOR_ENCODER:
-            self.stats['encoder_count'] += 1
-            if tlv_len == ctypes.sizeof(PayloadSensorEncoder):
-                encoder = PayloadSensorEncoder.from_buffer_copy(tlv_data)
-                print(f"  [SENSOR_ENCODER]")
-                for i in range(4):
-                    print(f"    Motor {i}: pos={encoder.position[i]}, vel={encoder.velocity[i]}")
-                print(f"    Timestamp: {encoder.timestamp}µs")
-            else:
-                print(f"  [SENSOR_ENCODER] Size mismatch")
-
-        else:
-            print(f"  [TLV Type {tlv_type}] Length={tlv_len} bytes (unknown type)")
+    # ---- RX ----
 
     def process_incoming(self):
-        """Read and decode incoming serial data"""
         if self.ser.in_waiting > 0:
             data = self.ser.read(self.ser.in_waiting)
             self.decoder.decode(data)
 
+    def decode_callback(self, error_code, frame_header, tlv_list):
+        if error_code != DecodeErrorCode.NoError:
+            self.stats['decode_errors'] += 1
+            name = error_code.name if hasattr(error_code, 'name') else str(error_code)
+            self.stats['decode_errors_by_type'][name] = \
+                self.stats['decode_errors_by_type'].get(name, 0) + 1
+            print(f"[RX] Decode error: {error_code}")
+            return
+
+        self.stats['frames_received'] += 1
+        print(f"[RX] Frame from 0x{frame_header.deviceId:02X}, "
+              f"seq={frame_header.frameNum}, {frame_header.numTlvs} TLV(s)")
+
+        for tlv_type, tlv_len, tlv_data in tlv_list:
+            type_name = TLV_NAMES.get(tlv_type, f"0x{tlv_type:X}")
+            self.stats['by_type'][type_name] = self.stats['by_type'].get(type_name, 0) + 1
+            self.handle_tlv(tlv_type, tlv_len, tlv_data)
+
+    def handle_tlv(self, tlv_type: int, tlv_len: int, tlv_data: bytes):
+        if tlv_type == SYS_STATUS:
+            self._print_sys_status(tlv_len, tlv_data)
+
+        elif tlv_type == DC_STATUS_ALL:
+            self._print_dc_status(tlv_len, tlv_data)
+
+        elif tlv_type == STEP_STATUS_ALL:
+            self._print_step_status(tlv_len, tlv_data)
+
+        elif tlv_type == SERVO_STATUS_ALL:
+            self._print_servo_status(tlv_len, tlv_data)
+
+        elif tlv_type == SENSOR_VOLTAGE:
+            if tlv_len == ctypes.sizeof(PayloadSensorVoltage):
+                v = PayloadSensorVoltage.from_buffer_copy(tlv_data)
+                print(f"  [SENSOR_VOLTAGE] Batt={v.batteryMv} mV  "
+                      f"5V={v.rail5vMv} mV  Servo={v.servoRailMv} mV")
+            else:
+                print(f"  [SENSOR_VOLTAGE] size mismatch ({tlv_len})")
+
+        elif tlv_type == SENSOR_IMU:
+            self._print_imu(tlv_len, tlv_data)
+
+        elif tlv_type == SENSOR_KINEMATICS:
+            if tlv_len == ctypes.sizeof(PayloadSensorKinematics):
+                k = PayloadSensorKinematics.from_buffer_copy(tlv_data)
+                print(f"  [KINEMATICS] x={k.x:.1f} mm  y={k.y:.1f} mm  "
+                      f"θ={math.degrees(k.theta):.1f}°  "
+                      f"vx={k.vx:.1f} mm/s  ω={math.degrees(k.vTheta):.1f}°/s")
+            else:
+                print(f"  [SENSOR_KINEMATICS] size mismatch ({tlv_len})")
+
+        elif tlv_type == IO_STATUS:
+            if tlv_len >= ctypes.sizeof(PayloadIOStatus):
+                io = PayloadIOStatus.from_buffer_copy(tlv_data[:ctypes.sizeof(PayloadIOStatus)])
+                print(f"  [IO_STATUS] buttons=0x{io.buttonMask:04X}  "
+                      f"LEDs={list(io.ledBrightness)}")
+            else:
+                print(f"  [IO_STATUS] size mismatch ({tlv_len})")
+
+        else:
+            print(f"  [Type {TLV_NAMES.get(tlv_type, tlv_type)}] {tlv_len} bytes (not decoded)")
+
+    def _print_sys_status(self, tlv_len: int, tlv_data: bytes):
+        expected = ctypes.sizeof(PayloadSystemStatus)
+        if tlv_len != expected:
+            print(f"  [SYS_STATUS] size mismatch: expected {expected}, got {tlv_len}")
+            return
+        s = PayloadSystemStatus.from_buffer_copy(tlv_data)
+        state_name = SYS_STATE_NAMES.get(s.state, f"?{s.state}")
+        errors = [name for bit, name in ERROR_FLAGS.items() if s.errorFlags & bit]
+        print(f"  [SYS_STATUS] v{s.firmwareMajor}.{s.firmwareMinor}.{s.firmwarePatch}  "
+              f"state={state_name}  uptime={s.uptimeMs/1000:.1f}s")
+        print(f"    Batt={s.batteryMv} mV  5V={s.rail5vMv} mV  "
+              f"SRAM={s.freeSram} B  loop={s.loopTimeAvgUs}/{s.loopTimeMaxUs} µs avg/max")
+        print(f"    errors={'|'.join(errors) if errors else 'none'}  "
+              f"sensors=0x{s.attachedSensors:02X}  "
+              f"lastRx={s.lastRxMs} ms ago")
+
+    def _print_dc_status(self, tlv_len: int, tlv_data: bytes):
+        expected = ctypes.sizeof(PayloadDCStatusAll)
+        if tlv_len != expected:
+            print(f"  [DC_STATUS_ALL] size mismatch: expected {expected}, got {tlv_len}")
+            return
+        d = PayloadDCStatusAll.from_buffer_copy(tlv_data)
+        for i, m in enumerate(d.motors):
+            if m.mode == 0:
+                continue  # skip disabled motors
+            print(f"  [DC M{i}] mode={DC_MODE_NAMES.get(m.mode, m.mode)}  "
+                  f"pos={m.position}  vel={m.velocity} t/s  pwm={m.pwmOutput}")
+
+    def _print_step_status(self, tlv_len: int, tlv_data: bytes):
+        expected = ctypes.sizeof(PayloadStepStatusAll)
+        if tlv_len != expected:
+            print(f"  [STEP_STATUS_ALL] size mismatch: expected {expected}, got {tlv_len}")
+            return
+        d = PayloadStepStatusAll.from_buffer_copy(tlv_data)
+        for i, st in enumerate(d.steppers):
+            if not st.enabled:
+                continue
+            state_name = STEPPER_STATE_NAMES.get(st.motionState, f"?{st.motionState}")
+            print(f"  [STEP S{i}] {state_name}  "
+                  f"pos={st.commandedCount}  target={st.targetCount}  "
+                  f"speed={st.currentSpeed} sps")
+
+    def _print_servo_status(self, tlv_len: int, tlv_data: bytes):
+        expected = ctypes.sizeof(PayloadServoStatusAll)
+        if tlv_len != expected:
+            print(f"  [SERVO_STATUS_ALL] size mismatch: expected {expected}, got {tlv_len}")
+            return
+        sv = PayloadServoStatusAll.from_buffer_copy(tlv_data)
+        pca = "OK" if sv.pca9685Connected else "NOT FOUND"
+        err = f" err=0x{sv.pca9685Error:02X}" if sv.pca9685Error else ""
+        active = [(i, sv.pulseUs[i])
+                  for i in range(16) if sv.enabledMask & (1 << i)]
+        print(f"  [SERVO] PCA9685={pca}{err}  "
+              f"enabled={'none' if not active else ', '.join(f'ch{i}={us}µs' for i,us in active)}")
+
+    def _print_imu(self, tlv_len: int, tlv_data: bytes):
+        expected = ctypes.sizeof(PayloadSensorIMU)
+        if tlv_len != expected:
+            print(f"  [SENSOR_IMU] size mismatch: expected {expected}, got {tlv_len}")
+            return
+        imu = PayloadSensorIMU.from_buffer_copy(tlv_data)
+        # Convert quaternion to Euler (roll, pitch, yaw in degrees)
+        w, x, y, z = imu.quatW, imu.quatX, imu.quatY, imu.quatZ
+        roll  = math.degrees(math.atan2(2*(w*x+y*z), 1-2*(x*x+y*y)))
+        pitch = math.degrees(math.asin(max(-1, min(1, 2*(w*y-z*x)))))
+        yaw   = math.degrees(math.atan2(2*(w*z+x*y), 1-2*(y*y+z*z)))
+        cal   = "9DOF" if imu.magCalibrated else "6DOF"
+        print(f"  [IMU/{cal}] roll={roll:.1f}°  pitch={pitch:.1f}°  yaw={yaw:.1f}°  "
+              f"accZ={imu.earthAccZ:.3f}g")
+
+    # ---- Stats ----
+
     def print_stats(self):
-        """Print communication statistics"""
         print("\n" + "="*60)
         print("STATISTICS:")
-        print(f"  Heartbeats sent: {self.stats['heartbeats_sent']}")
-        print(f"  Messages received: {self.stats['messages_received']}")
-        print(f"  System status: {self.stats['system_status_count']}")
-        print(f"  Voltage data: {self.stats['voltage_count']}")
-        print(f"  Encoder data: {self.stats['encoder_count']}")
-        print(f"  Total decode errors: {self.stats['decode_errors']}")
+        print(f"  Heartbeats sent:  {self.stats['heartbeats_sent']}")
+        print(f"  Frames received:  {self.stats['frames_received']}")
+        print(f"  Decode errors:    {self.stats['decode_errors']}")
         if self.stats['decode_errors_by_type']:
-            print("  Decode errors by type:")
-            for error_type, count in sorted(self.stats['decode_errors_by_type'].items()):
-                print(f"    {error_type}: {count}")
+            for k, v in self.stats['decode_errors_by_type'].items():
+                print(f"    {k}: {v}")
+        if self.stats['by_type']:
+            print("  TLVs received by type:")
+            for k, v in sorted(self.stats['by_type'].items()):
+                print(f"    {k}: {v}")
         print("="*60 + "\n")
 
+    # ---- Main loop ----
+
     def run(self):
-        """Main test loop"""
         if not self.connect():
             return
 
         print("\n" + "="*60)
-        print("UART TLV Communication Test")
+        print("UART TLV v2.0 Communication Test")
         print("="*60)
-        print("Commands:")
-        print("  h - Send heartbeat")
-        print("  s - Print statistics")
-        print("  e - Enable DC motor 0")
-        print("  d - Disable DC motor 0")
-        print("  v - Set DC motor 0 velocity to 1000")
-        print("  l - Set NeoPixel to green")
-        print("  q - Quit")
-        print("="*60 + "\n")
+        print("Commands (press key + Enter):")
+        print("  1   - SYS_CMD_START  (IDLE → RUNNING, enables telemetry)")
+        print("  2   - SYS_CMD_STOP   (RUNNING → IDLE)")
+        print("  3   - SYS_CMD_RESET  (ESTOP/ERROR → IDLE)")
+        print("  4   - SYS_CMD_ESTOP  (any → ESTOP)")
+        print("  e   - DC motor 0: enable velocity mode")
+        print("  d   - DC motor 0: disable")
+        print("  f   - DC motor 0: run at 500 ticks/s")
+        print("  r   - DC motor 0: run at -500 ticks/s (reverse)")
+        print("  p   - DC motor 0: direct PWM +150")
+        print("  sa  - Servo ch 0: enable + center (1500 µs)")
+        print("  sx  - Servo ch 0: disable")
+        print("  l   - NeoPixel 0: green")
+        print("  s   - Print statistics")
+        print("  h   - Send heartbeat manually")
+        print("  q   - Quit")
+        print("="*60)
+        print("Heartbeats are sent automatically every 200 ms.\n")
 
         try:
             while self.running:
-                # Send periodic heartbeat
-                current_time = time.time()
-                if current_time - self.last_heartbeat_time >= HEARTBEAT_INTERVAL:
+                # Auto-heartbeat
+                now = time.time()
+                if now - self.last_heartbeat_time >= HEARTBEAT_INTERVAL:
                     self.send_heartbeat()
-                    self.last_heartbeat_time = current_time
+                    self.last_heartbeat_time = now
 
-                # Process incoming messages
                 self.process_incoming()
 
-                # Check for user commands (non-blocking)
+                # Non-blocking stdin check
                 import select
                 if select.select([sys.stdin], [], [], 0.0)[0]:
-                    cmd = sys.stdin.read(1)
+                    cmd = sys.stdin.readline().strip()
 
-                    if cmd == 'h':
-                        self.send_heartbeat()
+                    if cmd == '1':
+                        self.send_sys_cmd(1)  # START
+                    elif cmd == '2':
+                        self.send_sys_cmd(2)  # STOP
+                    elif cmd == '3':
+                        self.send_sys_cmd(3)  # RESET
+                    elif cmd == '4':
+                        self.send_sys_cmd(4)  # ESTOP
+                    elif cmd == 'e':
+                        self.send_dc_enable(0, 2)   # velocity mode
+                    elif cmd == 'd':
+                        self.send_dc_enable(0, 0)   # disable
+                    elif cmd == 'f':
+                        self.send_dc_velocity(0, 500)
+                    elif cmd == 'r':
+                        self.send_dc_velocity(0, -500)
+                    elif cmd == 'p':
+                        self.send_dc_enable(0, 3)   # PWM mode
+                        self.send_dc_pwm(0, 150)
+                    elif cmd == 'sa':
+                        self.send_servo_enable(0, True)
+                        self.send_servo_set(0, 1500)
+                    elif cmd == 'sx':
+                        self.send_servo_enable(0, False)
+                    elif cmd == 'l':
+                        self.send_neopixel(0, 0, 255, 0)
                     elif cmd == 's':
                         self.print_stats()
-                    elif cmd == 'e':
-                        self.send_dc_enable(0, True, mode=2)
-                    elif cmd == 'd':
-                        self.send_dc_enable(0, False, mode=0)
-                    elif cmd == 'v':
-                        self.send_dc_velocity(0, 1000)
-                    elif cmd == 'l':
-                        self.send_neopixel(0, 0, 255, 0)  # Green
+                    elif cmd == 'h':
+                        self.send_heartbeat()
+                        print("[TX] Heartbeat sent manually")
                     elif cmd == 'q':
                         print("\n[Test] Exiting...")
                         self.running = False
-                    else:
-                        print(f"Unknown command: {cmd}")
+                    elif cmd:
+                        print(f"Unknown command: '{cmd}'")
 
-                time.sleep(0.01)  # 100Hz loop
+                time.sleep(0.01)  # 100 Hz poll loop
 
         except KeyboardInterrupt:
             print("\n[Test] Interrupted by user")
-
         finally:
             self.print_stats()
             self.disconnect()
@@ -382,12 +678,12 @@ class UARTTest:
 # ============================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description='UART TLV Communication Test for Arduino')
-    parser.add_argument('--port', type=str, default=DEFAULT_PORT,
+    parser = argparse.ArgumentParser(
+        description='UART TLV v2.0 Communication Test (pairs with test_uart_tlv.ino)')
+    parser.add_argument('--port', default=DEFAULT_PORT,
                         help=f'Serial port (default: {DEFAULT_PORT})')
     parser.add_argument('--baud', type=int, default=DEFAULT_BAUD,
                         help=f'Baud rate (default: {DEFAULT_BAUD})')
-
     args = parser.parse_args()
 
     test = UARTTest(port=args.port, baudrate=args.baud)
