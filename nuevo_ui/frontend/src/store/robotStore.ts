@@ -80,8 +80,7 @@ const SYSTEM_WARNING_LABELS: [number, string][] = [
 ]
 
 const DC_FAULT_LABELS: [number, string][] = [
-  [0x01, 'Overcurrent'],
-  [0x02, 'Stall'],
+  [0x02, 'Encoder Fault'],
 ]
 
 const HISTORY_WINDOW_MS = 22_000
@@ -507,25 +506,20 @@ export const useRobotStore = create<RobotState>((set) => ({
         const cutoff = bridgeTimeMs - HISTORY_WINDOW_MS
         const motors = (data as DCStateAllData).motors
 
-        for (const motor of motors) {
-          if (motor.faultFlags) {
-            set((state) => {
-              let errorLog = state.errorLog
-              for (const [bit, suffix] of DC_FAULT_LABELS) {
-                if (motor.faultFlags & bit) {
-                  errorLog = addOrIncrement(errorLog, `dc_${bit}_${motor.motorNumber}`, `Motor ${motor.motorNumber} ${suffix}`)
-                }
-              }
-              return { errorLog }
-            })
-          }
-        }
-
         set((state) => {
+          let errorLog = state.errorLog
           const newDCMotors = [...state.dcMotors]
           for (const motor of motors) {
             const idx = motor.motorNumber - 1
             if (idx < 0 || idx > 3) continue
+
+            const prevFaultFlags = newDCMotors[idx].status?.faultFlags ?? 0
+            const risingFaultFlags = motor.faultFlags & ~prevFaultFlags
+            for (const [bit, suffix] of DC_FAULT_LABELS) {
+              if (risingFaultFlags & bit) {
+                errorLog = addOrIncrement(errorLog, `dc_${bit}_${motor.motorNumber}`, `Motor ${motor.motorNumber} ${suffix}`)
+              }
+            }
 
             const posPid = state.dcPidCache[cacheKey(motor.motorNumber, 0)]
             const velPid = state.dcPidCache[cacheKey(motor.motorNumber, 1)]
@@ -564,7 +558,7 @@ export const useRobotStore = create<RobotState>((set) => ({
               frameIndexHistory: start > 0 ? newFrame.slice(start) : newFrame,
             }
           }
-          return { dcMotors: newDCMotors }
+          return { dcMotors: newDCMotors, errorLog }
         })
         break
       }

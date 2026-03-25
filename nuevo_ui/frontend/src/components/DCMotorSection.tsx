@@ -80,7 +80,13 @@ export function DCMotorSection({ motorId }: DCMotorSectionProps) {
 
   const handleSendCommand = () => {
     const targetMode = MODE_MAP[controlMode];
-    // Switch to correct mode if needed (even if motor is currently disabled)
+    // Do not implicitly enable a disabled motor from a setpoint action.
+    // The explicit enable switch remains the only UI path that arms the motor.
+    if (!isEnabled) {
+      return;
+    }
+
+    // Switch active control mode only when the motor is already enabled.
     if ((status?.mode ?? 0) !== targetMode) {
       wsSend('dc_enable', { motorNumber: motorId, mode: targetMode });
     }
