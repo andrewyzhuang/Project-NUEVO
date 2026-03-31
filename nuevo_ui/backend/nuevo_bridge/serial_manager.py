@@ -33,6 +33,7 @@ from typing import Optional
 from .config import (
     SERIAL_PORT, SERIAL_BAUD, SERIAL_TIMEOUT,
     HEARTBEAT_INTERVAL, DEVICE_ID, ENABLE_CRC, STATS_INTERVAL,
+    MOCK_ODOMETRY_ENABLED,
 )
 from .payloads import (
     PayloadHeartbeat, PayloadSysCmd,
@@ -647,7 +648,8 @@ class _ArduinoSim:
         if self.state == _SYS_RUNNING:
             self._update_motors(dt)
             self._update_steppers(dt)
-            self._update_kinematics(dt)
+            if MOCK_ODOMETRY_ENABLED:
+                self._update_kinematics(dt)
             self._update_imu(dt)
 
         active_motors = sum(1 for m in self.dc if m.mode != _DC_DISABLED)
@@ -1213,7 +1215,10 @@ class MockSerialManager:
 
     async def run(self):
         self._running = True
-        print("[Mock] Starting mock serial manager (100 Hz physics simulation)...")
+        print(
+            f"[Mock] Starting mock serial manager (100 Hz physics simulation, "
+            f"odometry={'on' if MOCK_ODOMETRY_ENABLED else 'off'})..."
+        )
 
         TARGET_DT = 0.01
         last_tick = time.monotonic()
@@ -1246,7 +1251,8 @@ class MockSerialManager:
                     self._gen_step_status_all()
                     self._gen_io_input_state()
                     self._gen_sensor_imu()
-                    self._gen_sensor_kinematics()
+                    if MOCK_ODOMETRY_ENABLED:
+                        self._gen_sensor_kinematics()
                     self._gen_sensor_ultrasonic_all()
 
                 if self._tick % self._TICK_RUNTIME_SLOW == 0:

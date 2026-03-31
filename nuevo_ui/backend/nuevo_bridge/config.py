@@ -20,6 +20,7 @@ WS_HEARTBEAT_INTERVAL = 1.0  # seconds (ping to keep connection alive)
 
 # Mock mode (for development without hardware)
 MOCK_MODE = os.getenv("NUEVO_MOCK", "0") == "1"
+MOCK_ODOMETRY_ENABLED = os.getenv("NUEVO_MOCK_ODOMETRY", "1") == "1"
 
 # Connection statistics broadcast interval
 STATS_INTERVAL = 1.0  # seconds

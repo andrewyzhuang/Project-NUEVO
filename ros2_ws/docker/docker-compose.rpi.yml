@@ -2,16 +2,18 @@
 # docker-compose.rpi.yml — Raspberry Pi 5 with real Arduino
 #
 # Usage (from Project-NUEVO/ repository root):
-#   docker compose -f ros2_ws/docker/docker-compose.rpi.yml up
+#   docker compose -f ros2_ws/docker/docker-compose.rpi.yml up -d
 #
-# First startup builds the ROS workspace with colcon (~60s).
+# First startup builds the ROS workspace with colcon (~60s), then the
+# container stays idle so ROS nodes can be started manually with
+# `docker compose exec`.
 # Subsequent restarts reuse the cached build artifacts (named volumes): ~5s.
 #   - Python / .msg changes → docker compose restart  (no image rebuild)
 #   - Pip dep changes        → docker compose build    (rebuilds image layer)
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
-  robot:
+  ros2_runtime:
     build:
       context: ../..
       dockerfile: ros2_ws/docker/Dockerfile.robot
@@ -42,7 +44,7 @@ services:
     restart: unless-stopped
 
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD-SHELL", "test -f /ros2_ws/install/setup.bash"]
       interval: 10s
       timeout: 5s
       retries: 3

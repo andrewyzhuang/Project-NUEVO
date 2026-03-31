@@ -2,19 +2,21 @@
 # docker-compose.vm.yml — macOS / Windows development (mock mode)
 #
 # Usage (from Project-NUEVO/ repository root):
-#   docker compose -f ros2_ws/docker/docker-compose.vm.yml up
+#   docker compose -f ros2_ws/docker/docker-compose.vm.yml up -d
 #
 # Runs in mock mode (NUEVO_MOCK=1) — no Arduino required.
 # Use this for ROS2 learning and development on macOS or Windows.
 #
-# First startup builds the ROS workspace with colcon (~60s).
+# First startup builds the ROS workspace with colcon (~60s), then the
+# container stays idle so ROS nodes can be started manually with
+# `docker compose exec`.
 # Subsequent restarts reuse the cached build artifacts (named volumes): ~5s.
 #   - Python / .msg changes → docker compose restart  (no image rebuild)
 #   - Pip dep changes        → docker compose build    (rebuilds image layer)
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
-  robot:
+  ros2_runtime:
     build:
       context: ../..
       dockerfile: ros2_ws/docker/Dockerfile.robot
@@ -40,11 +42,12 @@ services:
     environment:
       - NUEVO_BRIDGE_SOURCE=/workspace/nuevo_bridge_source
       - NUEVO_MOCK=1
+      - NUEVO_MOCK_ODOMETRY=1
 
     restart: unless-stopped
 
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD-SHELL", "test -f /ros2_ws/install/setup.bash"]
       interval: 10s
       timeout: 5s
       retries: 3
