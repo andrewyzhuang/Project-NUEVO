@@ -254,7 +254,7 @@ extern Print &DEBUG_SERIAL;
 // ============================================================================
 
 // IMU (ICM-20948 via SparkFun library + Fusion AHRS)
-#define IMU_ENABLED             1
+#define IMU_ENABLED             0
 // AD0_VAL: 0 = I2C addr 0x68 (AD0 pin LOW), 1 = I2C addr 0x69 (AD0 pin HIGH)
 #define IMU_AD0_VAL             1       // SparkFun breakout default: AD0 high = 0x69
 // Explicit IMU full-scale settings. Keep these aligned with FusionWrapper and
@@ -285,7 +285,7 @@ extern Print &DEBUG_SERIAL;
 // Qwiic bus and the Pi test tooling in ros2_ws/tests if the lidar is needed.
 
 // Ultrasonic
-// Note: ultrasonic is not supported on the Arduino firmware. Use the RPi-side
+// Note: ultrasonic is not supported on the Arduino firmware at the moment. Use the RPi-side
 // sensor stack for ultrasonic sensing, similar to the lidar path.
 #define ULTRASONIC_COUNT        0
 
@@ -426,18 +426,18 @@ extern Print &DEBUG_SERIAL;
 // Homing is disabled if no limit switch pins are defined.
 
 #define PIN_ST1_LIMIT           PIN_LIM1  // Stepper 1 limit (40)
-#define PIN_ST2_LIMIT           PIN_LIM2  // Stepper 2 limit (41)
-#define PIN_ST3_LIMIT           PIN_LIM3  // Stepper 3 limit (48)
-#define PIN_ST4_LIMIT           PIN_LIM4  // Stepper 4 limit (49)
+// #define PIN_ST2_LIMIT           PIN_LIM2  // Stepper 2 limit (41)
+// #define PIN_ST3_LIMIT           PIN_LIM3  // Stepper 3 limit (48)
+// #define PIN_ST4_LIMIT           PIN_LIM4  // Stepper 4 limit (49)
 
 // DC motor home limit switch assignments (optional)
 // Uncomment and update these definitions if DC motors use limit switches for
 // encoder zeroing / homing. Leave undefined to disable homing for that motor.
 
 #define PIN_M1_LIMIT        PIN_LIM5
-#define PIN_M2_LIMIT        PIN_LIM6
-#define PIN_M3_LIMIT        PIN_LIM7
-#define PIN_M4_LIMIT        PIN_LIM8
+// #define PIN_M2_LIMIT        PIN_LIM6
+// #define PIN_M3_LIMIT        PIN_LIM7
+// #define PIN_M4_LIMIT        PIN_LIM8
 
 // Limit switch active state
 #define LIMIT_ACTIVE_LOW        1       // 1 = active low, 0 = active high

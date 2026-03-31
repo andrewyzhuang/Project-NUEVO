@@ -1,11 +1,11 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
-# entrypoint.bridge.sh — Container entrypoint for NUEVO Bridge (ROS2 mode)
+# entrypoint.robot.sh — Container entrypoint for the ROS2 robot workspace
 #
-# Runs colcon build for the ROS2 workspace on every startup.
+# Builds the ROS2 workspace on startup, then leaves the container idle so users
+# can start nodes manually with `docker compose exec`.
 # Build artifacts are cached in named Docker volumes (build/ and install/),
 # so only the first startup is slow.
-# Subsequent restarts reuse the cache and are fast (~5s).
 # ─────────────────────────────────────────────────────────────────────────────
 set -e
 

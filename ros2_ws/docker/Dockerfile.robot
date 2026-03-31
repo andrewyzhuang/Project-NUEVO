@@ -45,8 +45,8 @@ WORKDIR /ros2_ws
 RUN mkdir -p src
 
 # ── Entrypoint ────────────────────────────────────────────────────────────────
-COPY ros2_ws/docker/entrypoint.bridge.sh /entrypoint.sh
+COPY ros2_ws/docker/entrypoint.robot.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["ros2", "run", "bridge", "bridge"]
+CMD ["bash", "-lc", "echo '[entrypoint] Container ready. Start ROS nodes manually with ros2 run ...'; exec sleep infinity"]

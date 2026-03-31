@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 from typing import Callable, Optional
 
-from .config import MOCK_MODE
+from .config import MOCK_MODE, MOCK_ODOMETRY_ENABLED
 from .message_router import MessageRouter
 from .serial_manager import MockSerialManager, SerialManager
 from .ws_manager import WSManager
@@ -104,6 +104,7 @@ class BridgeRuntime:
         return {
             "status": "ok",
             "mock_mode": MOCK_MODE,
+            "mock_odometry_enabled": MOCK_ODOMETRY_ENABLED,
             "ros2_mode": self.ros_enabled,
             "serial_connected": self.serial_manager.stats.get("connected", False),
             "ws_connections": self.ws_manager.get_connection_count(),
