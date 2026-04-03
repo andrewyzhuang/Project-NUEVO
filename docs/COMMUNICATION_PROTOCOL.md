@@ -682,6 +682,28 @@ The magnetometer calibration workflow remains a special case:
 #### `IO_SET_LED` ↓
 Set discrete LED behavior.
 
+Should include:
+
+- `ledId`
+- `mode`
+- `brightness`
+- `periodMs`
+- `dutyCycle`
+
+`mode` values are:
+
+- `0`: `OFF`
+- `1`: `ON`
+- `2`: `BLINK`
+- `3`: `BREATHE`
+- `4`: `PWM`
+
+Notes:
+
+- `brightness` is the brightness ceiling for `ON`, `BLINK`, `BREATHE`, and `PWM`
+- `periodMs` applies to `BLINK` and `BREATHE`
+- `dutyCycle` is reserved on the wire today; the current firmware LED implementation ignores it
+
 #### `IO_SET_NEOPIXEL` ↓
 Set NeoPixel behavior.
 
