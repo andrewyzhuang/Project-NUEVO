@@ -8,6 +8,7 @@
 .vscode/
 .local/
 openspec/
+CLAUDE.md
 
 # ============================================
 # ROS2 Workspace
