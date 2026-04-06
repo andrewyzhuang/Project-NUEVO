@@ -9,7 +9,7 @@ The firmware is the low-level controller for:
 - TLV communication with the Raspberry Pi
 - system state, safety policy, and user I/O
 
-The current release target is firmware `v0.9.7`.
+The current release target is firmware `v0.9.8`.
 
 ## What You Need
 

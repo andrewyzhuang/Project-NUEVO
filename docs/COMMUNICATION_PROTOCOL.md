@@ -470,6 +470,25 @@ Fields:
 `initialThetaDeg` is the heading used by future `SYS_ODOM_RESET` actions.
 It does not directly rewrite the live pose.
 
+#### `SYS_ODOM_PARAM_REQ / SYS_ODOM_PARAM_RSP`
+
+Query the current mutable odometry and differential-drive kinematics parameters.
+
+`SYS_ODOM_PARAM_REQ` is a lightweight query command. `SYS_ODOM_PARAM_RSP`
+returns the current runtime values for:
+
+- `wheelDiameterMm`
+- `wheelBaseMm`
+- `initialThetaDeg`
+- `leftMotorId`
+- `leftMotorDirInverted`
+- `rightMotorId`
+- `rightMotorDirInverted`
+
+The response uses the current runtime snapshot, so it reflects either the
+compile-time defaults from `config.h` or later changes applied by
+`SYS_ODOM_PARAM_SET`.
+
 #### `SYS_DIAG_REQ / SYS_DIAG_RSP`
 
 Query-only engineering diagnostics.

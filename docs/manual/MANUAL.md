@@ -1,7 +1,7 @@
 # NUEVO Board and Firmware Manual
 
 **NUEVO** = **N**avigation **U**nit for **E**ducation and **V**ersatile **O**perations
-**Board Revision:** Rev. B · **Firmware:** v0.9.7
+**Board Revision:** Rev. B · **Firmware:** v0.9.8
 
 ---
 
@@ -375,9 +375,11 @@ The firmware computes differential-drive odometry from the two designated wheel 
 #define WHEEL_BASE_MM     333.0f
 ```
 
-Odometry is updated at 200 Hz and streamed to the bridge as `SENSOR_KINEMATICS` telemetry. The coordinate frame follows the right-hand 2D convention: **+X is forward, +Y is left**. Initial heading `θ` defaults to 90° (facing the +Y axis) and can be overridden either with `INITIAL_THETA` in `config.h` or at runtime with `SYS_ODOM_PARAM_SET`.
+Odometry is updated in the 100 Hz sensor task and streamed to the bridge as `SENSOR_KINEMATICS` telemetry. The coordinate frame follows the right-hand 2D convention: **+X is forward, +Y is left**. Initial heading `θ` defaults to 90° (facing the +Y axis) and can be overridden either with `INITIAL_THETA` in `config.h` or at runtime with `SYS_ODOM_PARAM_SET`.
 
 `SYS_ODOM_RESET` resets the pose to `(0, 0, current initial theta)`. `SYS_ODOM_PARAM_SET` updates wheel geometry and left/right odom wheel mapping without overwriting the current pose.
+
+To inspect the current runtime odometry configuration, the bridge can send `SYS_ODOM_PARAM_REQ` and read back `SYS_ODOM_PARAM_RSP`. The response reports the active wheel diameter, wheel base, initial heading, left/right odom motors, and per-side direction inversion flags.
 
 ---
 

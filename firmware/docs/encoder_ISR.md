@@ -1,6 +1,6 @@
 # Encoder ISR — Implementation Reference
 
-> **Applies to:** Rev. B hardware · Firmware v0.9.7 · `arduino.ino` + `EncoderCounter.{h,cpp}` + `ISRScheduler.{h,cpp}`
+> **Applies to:** Rev. B hardware · Firmware v0.9.8 · `arduino.ino` + `EncoderCounter.{h,cpp}` + `ISRScheduler.{h,cpp}`
 
 ---
 
@@ -58,7 +58,7 @@ Two counting strategies are compiled in via `config.h`:
 #define ENCODER_4X    4   // Interrupt on both phases (CHANGE on A and B)
 ```
 
-### Active configuration (firmware v0.9.7)
+### Active configuration (firmware v0.9.8)
 
 ```c
 #define ENCODER_1_MODE    ENCODER_4X

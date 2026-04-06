@@ -584,7 +584,7 @@ class _ArduinoSim:
     Call update(dt) each tick, then read state to generate telemetry.
     """
 
-    FIRMWARE_VERSION = (0, 9, 6)
+    FIRMWARE_VERSION = (0, 9, 8)
 
     def __init__(self):
         self.state      = _SYS_INIT

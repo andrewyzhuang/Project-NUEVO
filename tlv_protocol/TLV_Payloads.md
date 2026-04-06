@@ -162,6 +162,28 @@ All payloads are tightly packed and little-endian.
 | `rightMotorId` | `u8` | 0-based, must differ from `leftMotorId` |
 | `rightMotorDirInverted` | `u8` | `0` or `1` |
 
+### `SYS_ODOM_PARAM_REQ = 14` ↓
+
+`PayloadSysOdomParamReq` — 4 bytes
+
+| Field | Type | Notes |
+|---|---|---|
+| `target` | `u8` | Reserved for future routing; send `0xFF` |
+
+### `SYS_ODOM_PARAM_RSP = 15` ↑
+
+`PayloadSysOdomParamRsp` — 16 bytes
+
+| Field | Type | Notes |
+|---|---|---|
+| `wheelDiameterMm` | `f32` | Current runtime odometry wheel diameter |
+| `wheelBaseMm` | `f32` | Current runtime odometry wheel base |
+| `initialThetaDeg` | `f32` | Heading used by future `SYS_ODOM_RESET` |
+| `leftMotorId` | `u8` | Current 0-based left odometry motor |
+| `leftMotorDirInverted` | `u8` | `0` or `1` |
+| `rightMotorId` | `u8` | Current 0-based right odometry motor |
+| `rightMotorDirInverted` | `u8` | `0` or `1` |
+
 ## DC Motors
 
 ### `DC_ENABLE = 16` ↓
@@ -413,6 +435,8 @@ as `r,g,b` bytes.
 | 11 | `SYS_DIAG_RSP` | ↑ | 24 |
 | 12 | `SYS_ODOM_RESET` | ↓ | 4 |
 | 13 | `SYS_ODOM_PARAM_SET` | ↓ | 16 |
+| 14 | `SYS_ODOM_PARAM_REQ` | ↓ | 4 |
+| 15 | `SYS_ODOM_PARAM_RSP` | ↑ | 16 |
 | 16 | `DC_ENABLE` | ↓ | 4 |
 | 17 | `DC_SET_POSITION` | ↓ | 12 |
 | 18 | `DC_SET_VELOCITY` | ↓ | 8 |

@@ -76,6 +76,8 @@ FSM/path-planner threads read it.
 | `set_initial_theta(theta_deg)` | no | publishes `/sys_odom_param_set`; used on future odom resets |
 | `set_odom_left_motor(motor_id)` / `set_odom_right_motor(motor_id)` | no | select which DC motors represent the diff-drive wheels |
 | `set_odom_left_motor_dir_inverted(flag)` / `set_odom_right_motor_dir_inverted(flag)` | no | configure wheel-sign convention for odometry and high-level body motion |
+| `request_odometry_parameters()` | no | publishes `/sys_odom_param_req`; asks firmware for the active runtime odom snapshot |
+| `get_odometry_parameters() → dict` | no | returns the latest local / `/sys_odom_param_rsp` snapshot |
 | `get_power() → SystemPower` | no | cached `/sys_power` |
 
 #### Pose / odometry
