@@ -51,11 +51,11 @@ def configure_robot(robot: Robot) -> None:
 
 def show_idle_leds(robot: Robot) -> None:
     robot.set_led(LED.GREEN, 0)
-    robot.set_led(LED.RED, 255)
+    robot.set_led(LED.ORANGE, 255)
 
 
 def show_moving_leds(robot: Robot) -> None:
-    robot.set_led(LED.RED, 0)
+    robot.set_led(LED.ORANGE, 0)
     robot.set_led(LED.GREEN, 255)
 
 
@@ -76,12 +76,13 @@ def run(robot: Robot) -> None:
         (0.0, 0.0),
     ]
     
-    # path = path_control_points
-    path = densify_polyline(path_control_points, spacing=25.0)
+    path = path_control_points
+    # path = densify_polyline(path_control_points, spacing=25.0)
 
     state = "INIT"
     drive_handle = None
 
+    # FSM refresh rate control
     period = 1.0 / float(DEFAULT_FSM_HZ)
     next_tick = time.monotonic()
 
