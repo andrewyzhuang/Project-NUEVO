@@ -26,7 +26,7 @@ import math
 # Robot build configuration
 # ---------------------------------------------------------------------------
 
-TAG_ID = 11 # set aruco tag ID 11 
+TAG_ID = 21 # set aruco tag ID 
 POSITION_UNIT = Unit.MM
 WHEEL_DIAMETER = 74.0
 WHEEL_BASE = 333.0
@@ -120,6 +120,8 @@ def run(robot: Robot) -> None:
             # using robot.get_pose() function. Store the values in current_x, current_y, and current_theta_deg variables.
             current_x, current_y, current_theta_deg = robot.get_pose()
 
+            # Step 2: Convert current_theta_deg to radians and store it in current_theta_rad variable.  
+            current_theta_rad = math.radians(current_theta_deg)
             # Step 2: Convert current_theta_deg to radians and store it in current_theta_rad variable.
             current_theta_rad = math.radians(current_theta_deg)
 
@@ -128,9 +130,11 @@ def run(robot: Robot) -> None:
             # This will take out the waypoints that are already passed (within 20mm of the current position),
             # effectively "advancing" the path as the robot moves.
             remaining_path = robot._advance_remaining_path(remaining_path, current_x, current_y, advance_radius_mm=LOOKAHEAD_DIST)
+            remaining_path = robot._advance_remaining_path(remaining_path, current_x, current_y, advance_radius_mm=LOOKAHEAD_DIST)
 
             # Step 4: Use the _lookahead_point() function to calculate the current pursuit point
             # in your path, defined as (current_pursuit_x, current_pursuit_y)
+            current_pursuit_x, current_pursuit_y = planner1._lookahead_point(current_x, current_y, waypoints=remaining_path)
             current_pursuit_x, current_pursuit_y = planner1._lookahead_point(
                 current_x,
                 current_y,
