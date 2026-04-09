@@ -22,6 +22,7 @@ from robot.path_planner import PurePursuitPlanner
 import math
 import numpy as np
 
+
 # ---------------------------------------------------------------------------
 # Robot build configuration
 # ---------------------------------------------------------------------------
@@ -93,7 +94,7 @@ def run(robot: Robot) -> None:
             # initialize the DWA path follower with parameters
             robot._nav_follow_dwa_path(max_vel_mm = 200.0,
             max_acc_mm = 300.0,
-            max_angular_rad = 1.0,
+            max_angular_radv = 1.0,
             max_angular_acc_rad = 2.0,
             lookahead_mm = 200.0,
             advance_radius_mm = 150.0,
@@ -121,6 +122,7 @@ def run(robot: Robot) -> None:
 
         elif state == "MOVING":
             show_moving_leds(robot)
+            
             
         # FSM refresh rate control
         next_tick += period

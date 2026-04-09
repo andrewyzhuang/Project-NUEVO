@@ -7,6 +7,9 @@ import threading
 from enum import Enum, IntEnum
 
 from rclpy.node import Node
+from sensor_msgs.msg import LaserScan
+import numpy as np
+import matplotlib.pyplot as plt
 
 from bridge_interfaces.msg import (
     DCEnable,
@@ -208,8 +211,7 @@ class Robot:
         self._button_edges: int = 0
         self._limit_edges: int = 0
         self._have_io_input: bool = False
-        self._obstacles_mm: list[tuple[float, float]] = []
-        self._obstacle_provider: Callable[[], list[tuple[float, float]]] | None = None
+        self._obstacles_mm: np.ndarray= np.float64([])
 
         # ── Events ────────────────────────────────────────────────────────────
         self._pose_event: threading.Event = threading.Event()
@@ -259,6 +261,7 @@ class Robot:
         node.create_subscription(IOInputState,     '/io_input_state',    self._on_io_input,    10)
         node.create_subscription(IOOutputState,    '/io_output_state',   self._on_io_output,   10)
         node.create_subscription(SysOdomParamRsp,  '/sys_odom_param_rsp', self._on_odom_param_rsp, 10)
+        node.create_subscription(LaserScan,        '/scan',              self._on_lidar, 10)
 
         # ── Service clients ───────────────────────────────────────────────────
         self._set_state_client = node.create_client(SetFirmwareState, '/set_firmware_state')
@@ -369,6 +372,21 @@ class Robot:
             int(msg.right_motor_number),
             bool(msg.right_motor_dir_inverted),
         )
+    
+    def _on_lidar(self, msg: LaserScan) -> None:
+        angles = np.arange(msg.angle_min, msg.angle_max+msg.angle_increment, msg.angle_increment)
+        ranges = np.array(msg.ranges)
+
+        # Filter invalid values
+        valid = np.isfinite(ranges)
+        angles = angles[valid]
+        ranges = ranges[valid]
+
+        # Convert to Cartesian
+        x = ranges * np.cos(angles)
+        y = ranges * np.sin(angles)
+        with self._lock:
+            self._obstacles_mm = np.float64(np.concatenate([x[:,np.newaxis], y[:,np.newaxis]], axis=1)) * 1000.0
 
     # =========================================================================
     # System
@@ -554,20 +572,20 @@ class Robot:
         code can either call this repeatedly with fresh detections or install a
         live provider with set_obstacle_provider().
         """
-        converted = [
+        converted = np.float64([
             (
                 self._require_finite_float("obstacle_x", obs_x) * self._unit.value,
                 self._require_finite_float("obstacle_y", obs_y) * self._unit.value,
             )
             for obs_x, obs_y in obstacles
-        ]
+        ])
         with self._lock:
             self._obstacles_mm = converted
 
     def clear_obstacles(self) -> None:
         """Clear the cached APF obstacle list set by set_obstacles()."""
         with self._lock:
-            self._obstacles_mm = []
+            self._obstacles_mm = np.float64([])
 
     def get_obstacles(self) -> list[tuple[float, float]]:
         """Return the current APF obstacles in the current user length unit."""
@@ -1521,6 +1539,54 @@ class Robot:
                 break
 
         self.stop()
+    
+    # obstacle avoidance
+    def _nav_follow_dwa_path(
+        self,
+        max_vel_mm: float,
+        max_acc_mm: float,
+        max_angular_rad: float,
+        max_angular_acc_rad: float,
+        lookahead_mm: float,
+        advance_radius_mm: float,
+        tolerance_mm: float,
+        gains_of_costs: list[float],
+        period: float,
+        predict_time: float,
+        predict_velocity_samples_resolution: list[float],
+        obstacles_range_mm: float,
+        ttc_weight: float,
+    ) -> None:
+        """Navigation thread body: DWA path following with robot-frame obstacles."""
+        from robot.path_planner import DWAPlanner
+        # initialize the DWA planner with the provided parameters
+        self.planner = DWAPlanner(
+            lookahead_dist = lookahead_mm,
+            max_linear_speed = max_vel_mm,
+            max_angular_speed = max_angular_rad,
+            max_linear_acc = max_acc_mm,
+            max_angular_acc = max_angular_acc_rad,
+            goal_tolerance = tolerance_mm,
+            gains_of_costs = gains_of_costs,
+            dt = period,
+            predict_time = predict_time,
+            predict_velocity_samples_resolution = predict_velocity_samples_resolution,
+            robot_radius = advance_radius_mm,
+            obstacles_range = obstacles_range_mm,
+            ttc_weight = ttc_weight,
+        )
+
+    def _nav_follow_path_loop(self, path:np.ndarray, period: float):
+        v, w = self.planner.compute_velocity(path, self._pose, self._vel, self._obstacles_mm, period)
+        self.set_velocity(v, math.degrees(w))
+        print(f"Current Pose: ({self._pose[0]:.1f}, {self._pose[1]:.1f}, {math.degrees(self._pose[2]):.1f} deg)")
+
+        if self.planner.TargetReached(path[-1], self._pose[0], self._pose[1]):
+            print("MOVING: Target reached! Stopping.")
+            self.stop()
+            return "IDLE"
+        
+        return "MOVING"
 
     @staticmethod
     def _advance_remaining_path(
@@ -1632,24 +1698,44 @@ class Robot:
     def _get_obstacles_mm(self) -> list[tuple[float, float]]:
         """Return cached and provider-supplied APF obstacles in robot-frame millimeters."""
         with self._lock:
-            cached = list(self._obstacles_mm)
-            provider = self._obstacle_provider
+            return self._obstacles_mm
+        # with self._lock:
+        #     cached = list(self._obstacles_mm)
+        #     provider = self._obstacle_provider
 
-        dynamic: list[tuple[float, float]] = []
-        if provider is not None:
-            try:
-                provided = provider() or []
-                dynamic = [
-                    (
-                        self._require_finite_float("obstacle_x_mm", obs_x),
-                        self._require_finite_float("obstacle_y_mm", obs_y),
-                    )
-                    for obs_x, obs_y in provided
-                ]
-            except Exception as exc:
-                self._node.get_logger().error(f"obstacle provider failed: {exc}")
+        # dynamic: list[tuple[float, float]] = []
+        # if provider is not None:
+        #     try:
+        #         provided = provider() or []
+        #         dynamic = [
+        #             (
+        #                 self._require_finite_float("obstacle_x_mm", obs_x),
+        #                 self._require_finite_float("obstacle_y_mm", obs_y),
+        #             )
+        #             for obs_x, obs_y in provided
+        #         ]
+        #     except Exception as exc:
+        #         self._node.get_logger().error(f"obstacle provider failed: {exc}")
 
-        return cached + dynamic
+        # return cached + dynamic
+    
+    def _draw_lidar_obstacles(self):
+        plt.ion()
+        self.fig, self.ax = plt.subplots()
+        self.ax.clear()
+        print(self._obstacles_mm)
+        if self._obstacles_mm.size != 0:
+            self.ax.scatter(self._obstacles_mm[:, 0] / 1000.0, self._obstacles_mm[:, 1] / 1000.0, s=5)
+        self.ax.set_xlim(-3, 3)
+        self.ax.set_ylim(-3, 3)
+        self.ax.set_title("LiDAR Scan")
+        self.ax.set_aspect('equal')
+        
+        plt.grid()
+        plt.draw()
+        plt.pause(0.001)
+        # save the figure to a file
+        plt.savefig('/data/plot.png')
 
     @staticmethod
     def _require_id(name: str, value: int, low: int, high: int) -> int:
