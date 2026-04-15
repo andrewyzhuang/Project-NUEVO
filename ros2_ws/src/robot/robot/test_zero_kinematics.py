@@ -23,7 +23,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.signals import SignalHandlerOptions
 
-from robot.robot import Robot
+from robot.robot import FirmwareState, Robot
 
 # ---------------------------------------------------------------------------
 # Tunable parameters
@@ -56,13 +56,35 @@ def collect_leg(robot: Robot, label: str, duration: float) -> list[tuple[float, 
 
 
 def run(robot: Robot) -> None:
+    # Wait for the first pose update so we know the bridge is publishing and
+    # DDS discovery has settled before we try to call any services.
+    print("[zero_kinematics] Waiting for bridge…")
+    if not robot.wait_for_pose_update(timeout=10.0):
+        raise RuntimeError("[zero_kinematics] Timed out waiting for /sensor_kinematics — is the bridge running?")
+
+    if robot.get_state() != FirmwareState.RUNNING:
+        print("[zero_kinematics] Setting firmware to RUNNING…")
+        if not robot.set_state(FirmwareState.RUNNING, timeout=10.0):
+            raise RuntimeError("[zero_kinematics] Failed to set firmware to RUNNING state.")
+    else:
+        print("[zero_kinematics] Firmware already RUNNING.")
+
+    try:
+        _run_test(robot)
+    finally:
+        robot.stop()
+        robot.set_state(FirmwareState.IDLE)
+        print("[zero_kinematics] Firmware returned to IDLE.")
+
+
+def _run_test(robot: Robot) -> None:
     # ---- leg 1 ----
     samples_1 = collect_leg(robot, "leg 1", DRIVE_DURATION_S)
 
     print("[zero_kinematics] Resetting odometry after leg 1…")
     robot.reset_odometry()
-    if not robot.wait_for_pose_update(timeout=1.0):
-        raise RuntimeError("Timed out waiting for /sensor_kinematics after first reset.")
+    if not robot.wait_for_odometry_reset(timeout=2.0):
+        raise RuntimeError("Timed out waiting for firmware to confirm first odometry reset.")
     x, y, theta = robot.get_pose()
     print(f"[zero_kinematics] Pose after reset 1: x={x:.2f}, y={y:.2f}, theta={theta:.2f} deg")
 
@@ -71,8 +93,8 @@ def run(robot: Robot) -> None:
 
     print("[zero_kinematics] Resetting odometry after leg 2…")
     robot.reset_odometry()
-    if not robot.wait_for_pose_update(timeout=1.0):
-        raise RuntimeError("Timed out waiting for /sensor_kinematics after second reset.")
+    if not robot.wait_for_odometry_reset(timeout=2.0):
+        raise RuntimeError("Timed out waiting for firmware to confirm second odometry reset.")
     x, y, theta = robot.get_pose()
     print(f"[zero_kinematics] Pose after reset 2: x={x:.2f}, y={y:.2f}, theta={theta:.2f} deg")
 
@@ -132,6 +154,9 @@ def _plot(
     ax.grid(True)
 
     plt.tight_layout()
+    out_path = "/tmp/zero_kinematics_result.png"
+    plt.savefig(out_path, dpi=150)
+    print(f"[zero_kinematics] Plot saved to {out_path}")
     plt.show()
     print("[zero_kinematics] Plot displayed.")
 

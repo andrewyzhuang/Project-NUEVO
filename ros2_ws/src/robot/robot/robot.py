@@ -215,8 +215,8 @@ class Robot:
         self._ahrs_heading:        float | None = None   # absolute heading from AHRS (rad)
         self._ahrs_heading_offset: float      = 0.0    # AHRS heading at last reset_odometry()
         self._ahrs_accumulated:    float      = math.radians(self.INITIAL_THETA_DEG)  # incrementally unwrapped relative heading (rad)
-        self._ahrs_prev_wrapped:   float | None = None  # previous relative_ahrs for incremental unwrap
-        self._ahrs_first_sample:   bool       = True   # True until first calibrated sample is processed
+        self._ahrs_prev_wrapped:   float | None = None  # previous wrap(heading-offset); None = not yet seeded
+        self._odom_reset_pending:  bool       = False  # True between reset_odometry() call and firmware-confirmed reset tick
         self._fused_theta:        float      = math.radians(self.INITIAL_THETA_DEG)  # fusion strategy output (rad)
         self._fusion: SensorFusion           = ComplementaryFilter(alpha=0.02)
         self._pose:    tuple = (0.0, 0.0, 0.0)  # x_mm, y_mm, theta_rad (raw odometry)
@@ -250,6 +250,7 @@ class Robot:
 
         # ── Events ────────────────────────────────────────────────────────────
         self._pose_event: threading.Event = threading.Event()
+        self._odom_reset_event: threading.Event = threading.Event()
         self._button_events: dict[int, threading.Event] = {}
         self._limit_events:  dict[int, threading.Event] = {}
 
@@ -376,7 +377,12 @@ class Robot:
                 # Calibration lost or not yet acquired — clear the heading so
                 # _on_kinematics falls back to pure odometry rather than
                 # continuing to fuse against a stale absolute reference.
+                # Also clear _ahrs_prev_wrapped so that when calibration is
+                # regained the accumulator re-seeds from odometry rather than
+                # computing a delta from a pre-loss value (which may have
+                # jumped when the Madgwick filter reinitialised).
                 self._ahrs_heading = None
+                self._ahrs_prev_wrapped = None
 
     def _on_kinematics(self, msg: SensorKinematics) -> None:
         with self._lock:
@@ -395,29 +401,59 @@ class Robot:
             # in the same unbounded frame as odometry.  Their difference then stays
             # small, and wrap() in the filter is never discontinuous.
             if self._ahrs_heading is not None:
-                curr_wrapped = math.atan2(
-                    math.sin(self._ahrs_heading - self._ahrs_heading_offset),
-                    math.cos(self._ahrs_heading - self._ahrs_heading_offset),
-                )
-                if self._ahrs_prev_wrapped is not None:
-                    delta = math.atan2(
-                        math.sin(curr_wrapped - self._ahrs_prev_wrapped),
-                        math.cos(curr_wrapped - self._ahrs_prev_wrapped),
+                # If a reset is pending, wait for the firmware-confirmed tick
+                # where msg.theta has snapped to initial_theta_deg before
+                # capturing the AHRS zero reference.  Until then, suppress
+                # AHRS fusion so the filter sees only raw odometry.
+                _initial_theta_rad = math.radians(self._initial_theta_deg)
+                if self._odom_reset_pending:
+                    if abs(math.atan2(
+                        math.sin(msg.theta - _initial_theta_rad),
+                        math.cos(msg.theta - _initial_theta_rad),
+                    )) < math.radians(5.0):
+                        # Firmware confirmed the reset — capture AHRS offset
+                        # at this exact tick so both zero references share the
+                        # same physical timestamp.
+                        self._ahrs_heading_offset = self._ahrs_heading
+                        self._ahrs_prev_wrapped   = 0.0  # relative heading is 0 by definition
+                        self._odom_reset_pending  = False
+                        self._odom_reset_event.set()
+                    # Still pending: skip AHRS fusion this tick
+                    relative_ahrs = None
+                else:
+                    curr_wrapped = math.atan2(
+                        math.sin(self._ahrs_heading - self._ahrs_heading_offset),
+                        math.cos(self._ahrs_heading - self._ahrs_heading_offset),
                     )
-                    self._ahrs_accumulated += delta
-                elif self._ahrs_first_sample:
-                    # Very first calibrated sample since startup: seed the
-                    # accumulator from the actual AHRS reading so that
-                    # relative_ahrs equals the true heading, not 0.
-                    # (Post-reset the accumulator is pre-seeded by
-                    # reset_odometry() and _ahrs_first_sample is False.)
-                    self._ahrs_accumulated = curr_wrapped
-                    self._ahrs_first_sample = False
-                # else: first sample after reset_odometry() — accumulator
-                # already holds initial_theta, leave it unchanged.
-                self._ahrs_prev_wrapped = curr_wrapped
-                relative_ahrs = self._ahrs_accumulated
+                    if self._ahrs_prev_wrapped is None:
+                        # First AHRS sample since startup or after calibration
+                        # loss: seed the accumulator at the current odometry
+                        # level so the filter sees zero initial discrepancy.
+                        # Using msg.theta (not curr_wrapped) keeps both signals
+                        # in the same unbounded reference frame — AHRS then
+                        # contributes only incremental corrections, never an
+                        # absolute compass jump.
+                        self._ahrs_accumulated = msg.theta
+                    else:
+                        delta = math.atan2(
+                            math.sin(curr_wrapped - self._ahrs_prev_wrapped),
+                            math.cos(curr_wrapped - self._ahrs_prev_wrapped),
+                        )
+                        self._ahrs_accumulated += delta
+                    self._ahrs_prev_wrapped = curr_wrapped
+                    relative_ahrs = self._ahrs_accumulated
             else:
+                # AHRS not calibrated — if a reset is pending, check whether
+                # the firmware theta has returned to initial_theta so we can
+                # clear the pending flag (no AHRS offset to capture yet).
+                if self._odom_reset_pending:
+                    _initial_theta_rad = math.radians(self._initial_theta_deg)
+                    if abs(math.atan2(
+                        math.sin(msg.theta - _initial_theta_rad),
+                        math.cos(msg.theta - _initial_theta_rad),
+                    )) < math.radians(5.0):
+                        self._odom_reset_pending = False
+                        self._odom_reset_event.set()
                 relative_ahrs = None
             linear_vel  = math.hypot(float(msg.vx), float(msg.vy))
             angular_vel = float(msg.v_theta)
@@ -597,10 +633,20 @@ class Robot:
         report initial_theta (default 90°), not 0°.
         """
         with self._lock:
-            self._ahrs_heading_offset = self._ahrs_heading if self._ahrs_heading is not None else 0.0
+            # Do NOT capture _ahrs_heading_offset here.  The firmware will
+            # only process this reset after UART round-trip latency (~5-40 ms).
+            # Capturing the AHRS heading now and blending it with the
+            # not-yet-reset odometry produces a misaligned zero reference.
+            #
+            # Instead, set _odom_reset_pending = True so that _on_kinematics
+            # captures the AHRS offset on the first tick where msg.theta has
+            # already snapped back to initial_theta (i.e. firmware confirmed
+            # the reset).  That way both zero references share exactly the
+            # same physical timestamp.
             self._ahrs_accumulated  = math.radians(self._initial_theta_deg)
             self._ahrs_prev_wrapped = None
-            self._ahrs_first_sample = False  # post-reset seeding handled above
+            self._odom_reset_pending = True
+            self._odom_reset_event.clear()
         msg = SysOdomReset()
         msg.flags = 0
         self._odom_pub.publish(msg)
@@ -741,6 +787,18 @@ class Robot:
     def wait_for_pose_update(self, timeout: float = None) -> bool:
         """Block until the next /sensor_kinematics message arrives (~25 Hz)."""
         return self._pose_event.wait(timeout=timeout)
+
+    def wait_for_odometry_reset(self, timeout: float = 2.0) -> bool:
+        """Block until the firmware confirms the odometry reset (theta ≈ initial_theta).
+
+        Call this after reset_odometry() instead of multiple wait_for_pose_update()
+        calls to guarantee that the initial-heading capture has happened before
+        reading get_pose() or get_fused_orientation().
+
+        Returns True if the reset was confirmed within *timeout* seconds, False
+        if it timed out (the firmware may not have responded).
+        """
+        return self._odom_reset_event.wait(timeout=timeout)
 
     def set_obstacles(self, obstacles: list[tuple[float, float]]) -> None:
         """

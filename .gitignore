@@ -4,6 +4,8 @@
 # Local development environment
 # ============================================
 .claude/
+.agents/
+plugins/
 .codex
 .vscode/
 .local/

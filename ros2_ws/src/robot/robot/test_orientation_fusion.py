@@ -133,11 +133,13 @@ def _spin_in_place(robot: Robot, rec: _Record) -> None:
                 )
             time.sleep(0.05)
     robot.reset_odometry()
-    robot.wait_for_pose_update(timeout=1.0)
-    robot.wait_for_pose_update(timeout=1.0)  # second wait ensures firmware reset has propagated
+    if not robot.wait_for_odometry_reset(timeout=2.0):
+        raise RuntimeError(
+            "[fusion_test] Timed out waiting for firmware to confirm odometry reset."
+        )
 
     # Capture initial values — both should be ~0 after reset, but subtract
-    # as a safety net against the UART round-trip timing window.
+    # as a safety net against any residual UART timing jitter.
     fused_deg_0 = robot.get_fused_orientation()
     with robot._lock:
         odom_deg_0 = math.degrees(robot._pose[2])
