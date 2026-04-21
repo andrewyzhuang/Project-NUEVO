@@ -20,6 +20,12 @@ Unplug and reconnect the RPLidar C1, then verify the stable device path:
 ls -l /dev/rplidar
 ```
 
+If you need to remove the host rule later:
+
+```bash
+./ros2_ws/src/rplidar_ros/scripts/uninstall_udev_rule.sh
+```
+
 Start the driver inside the ROS container:
 
 ```bash
@@ -85,6 +91,12 @@ Unplug and reconnect the lidar, then verify:
 
 ```bash
 ls -l /dev/rplidar
+```
+
+Remove the rule if you want to undo the host setup:
+
+```bash
+./ros2_ws/src/rplidar_ros/scripts/uninstall_udev_rule.sh
 ```
 
 The rule uses the common CP210x USB serial adapter IDs:

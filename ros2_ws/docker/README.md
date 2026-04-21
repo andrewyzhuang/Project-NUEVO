@@ -12,6 +12,40 @@ The RPi container builds the ROS workspace on startup, starts the bridge launch
 file automatically, and keeps the bridge running through Docker's restart
 policy.
 
+## Most Common Commands
+
+From the repository root:
+
+```bash
+COMPOSE=ros2_ws/docker/docker-compose.rpi.yml
+```
+
+Restart the running ROS 2 runtime container:
+
+```bash
+docker compose -f $COMPOSE restart ros2_runtime
+```
+
+Restart it and watch logs:
+
+```bash
+docker compose -f $COMPOSE restart ros2_runtime
+docker compose -f $COMPOSE logs -f ros2_runtime
+```
+
+Rebuild and wait until the container is actually healthy:
+
+```bash
+docker compose -f $COMPOSE up -d --build --wait
+```
+
+Clear the cached ROS build/install volumes and do a full fresh startup:
+
+```bash
+docker compose -f $COMPOSE down -v
+docker compose -f $COMPOSE up -d --build --wait
+```
+
 ## Raspberry Pi Runtime
 
 Start or update the RPi container from the repository root:
@@ -77,54 +111,6 @@ Manual bridge health check:
 
 ```bash
 python3 -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read().decode())"
-```
-
-## Restarting Docker
-
-Restart only the ROS 2 runtime container:
-
-```bash
-COMPOSE=ros2_ws/docker/docker-compose.rpi.yml
-docker compose -f $COMPOSE restart ros2_runtime
-```
-
-Stop and start it again:
-
-```bash
-docker compose -f $COMPOSE down
-docker compose -f $COMPOSE up -d --wait
-```
-
-Watch logs:
-
-```bash
-docker compose -f $COMPOSE logs -f ros2_runtime
-```
-
-Rebuild after Dockerfile, entrypoint, or Python dependency changes:
-
-```bash
-docker compose -f $COMPOSE up -d --build --wait
-```
-
-If the logs do not show a line like this, the container is probably using an
-old image:
-
-```text
-[entrypoint] Building ROS2 packages: robot sensors bridge bridge_interfaces rplidar_ros
-```
-
-Run:
-
-```bash
-docker compose -f $COMPOSE up -d --build --wait
-```
-
-Clear cached ROS build/install volumes and rebuild from scratch:
-
-```bash
-docker compose -f $COMPOSE down -v
-docker compose -f $COMPOSE up -d --build --wait
 ```
 
 ## Docker Healthcheck

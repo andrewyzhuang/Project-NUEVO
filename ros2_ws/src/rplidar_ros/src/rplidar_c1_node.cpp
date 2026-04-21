@@ -6,10 +6,12 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <string>
@@ -117,7 +119,17 @@ private:
   {
     if (::access(serial_port_.c_str(), F_OK) != 0) {
       RCLCPP_WARN(
-        get_logger(), "Waiting for RPLIDAR C1 device %s", serial_port_.c_str());
+        get_logger(),
+        "RPLIDAR C1 is not connected: device path %s is missing. Waiting for the lidar to be plugged in.",
+        serial_port_.c_str());
+      return false;
+    }
+
+    if (::access(serial_port_.c_str(), R_OK | W_OK) != 0) {
+      RCLCPP_WARN(
+        get_logger(),
+        "RPLIDAR C1 was detected at %s, but this process cannot access it (%s). Check udev rules and dialout permissions.",
+        serial_port_.c_str(), std::strerror(errno));
       return false;
     }
 
@@ -139,7 +151,8 @@ private:
     sl_result result = driver_->connect(channel_.get());
     if (SL_IS_FAIL(result)) {
       RCLCPP_WARN(
-        get_logger(), "Could not connect to RPLIDAR C1 at %s: 0x%08x",
+        get_logger(),
+        "RPLIDAR C1 was detected at %s, but the device did not respond on the serial connection: 0x%08x",
         serial_port_.c_str(), result);
       return false;
     }
@@ -163,7 +176,10 @@ private:
     sl_lidar_response_device_info_t info{};
     sl_result result = driver_->getDeviceInfo(info);
     if (SL_IS_FAIL(result)) {
-      RCLCPP_WARN(get_logger(), "Failed to read RPLIDAR device info: 0x%08x", result);
+      RCLCPP_WARN(
+        get_logger(),
+        "RPLIDAR C1 responded on %s, but device info could not be read: 0x%08x",
+        serial_port_.c_str(), result);
       return false;
     }
 
@@ -192,7 +208,10 @@ private:
     sl_lidar_response_device_health_t health{};
     sl_result result = driver_->getHealth(health);
     if (SL_IS_FAIL(result)) {
-      RCLCPP_WARN(get_logger(), "Failed to read RPLIDAR health: 0x%08x", result);
+      RCLCPP_WARN(
+        get_logger(),
+        "RPLIDAR C1 responded on %s, but health status could not be read: 0x%08x",
+        serial_port_.c_str(), result);
       return false;
     }
 
@@ -246,7 +265,10 @@ private:
     }
 
     if (SL_IS_FAIL(result)) {
-      RCLCPP_WARN(get_logger(), "Failed to start RPLIDAR scan: 0x%08x", result);
+      RCLCPP_WARN(
+        get_logger(),
+        "RPLIDAR C1 connected on %s, but scanning could not be started: 0x%08x",
+        serial_port_.c_str(), result);
       return false;
     }
 

@@ -58,6 +58,10 @@ install(DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}
 )
 
+install(DIRECTORY scripts
+  DESTINATION share/${PROJECT_NAME}
+)
+
 install(FILES udev/99-rplidar-c1.rules
   DESTINATION share/${PROJECT_NAME}/udev
 )
