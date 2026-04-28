@@ -35,6 +35,8 @@ services:
       # colcon build cache — wipe with: docker compose down -v
       - jetson_build:/ros2_ws/build
       - jetson_install:/ros2_ws/install
+      # Writable runtime artifacts (captures, plots, logs) live here.
+      - ../../ros2_ws/runtime_output:/runtime_output
 
     # privileged is required for librealsense2 to access the USB device
     # via its user-space kernel bypass driver (libusb).

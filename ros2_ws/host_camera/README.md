@@ -172,6 +172,12 @@ The default virtual camera is:
 /dev/video10
 ```
 
+The default raw feed is:
+
+```text
+640x480 @ 15 Hz
+```
+
 The default label is:
 
 ```text

@@ -22,11 +22,13 @@ Default runtime parameters:
 - `model_imgsz`: `416`
 - `class_filter`: `traffic light,stop sign,person`
 - `confidence_threshold`: `0.25`
-- `process_rate_hz`: `5.0`
+- `camera_fps`: `15.0`
+- `process_rate_hz`: `4.0`
 - `ncnn_threads`: `4`
 - `camera_device`: `/dev/video10`
 - `camera_width`: `640`
 - `camera_height`: `480`
+- `debug_output_dir`: `/runtime_output/vision`
 
 Set `class_filter` to an empty string to publish all model classes:
 
@@ -38,6 +40,13 @@ Echo the detection topic from another shell inside the ROS container:
 
 ```bash
 ros2 topic echo /vision/detections
+```
+
+Launch files:
+
+```bash
+ros2 launch vision vision_production.launch.py
+ros2 launch vision vision_debug.launch.py
 ```
 
 ## Message Contract
@@ -63,6 +72,7 @@ Behavior:
 - bounding boxes use pixel coordinates in the captured image
 - traffic-light detections include a `color` attribute when color
   classification is enabled
+- optional debug image output writes annotated frames to `/runtime_output/vision`
 
 ## Student Extension Points
 

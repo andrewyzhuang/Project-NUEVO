@@ -40,6 +40,8 @@ services:
       # colcon build cache — only slow on first run. Wipe with: docker compose down -v
       - ros2_build:/ros2_ws/build
       - ros2_install:/ros2_ws/install
+      # Writable runtime artifacts (debug images, plots, logs) live here.
+      - ../../ros2_ws/runtime_output:/runtime_output
 
     environment:
       - NUEVO_BRIDGE_SOURCE=/workspace/nuevo_bridge_source

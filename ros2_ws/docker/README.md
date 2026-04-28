@@ -77,6 +77,25 @@ ros2 launch bridge bridge.launch.py
 That launch file starts the `bridge` executable, which runs the shared bridge
 web runtime and creates the ROS node named `/bridge`.
 
+## Runtime Output
+
+All Docker variants now bind-mount:
+
+```text
+ros2_ws/runtime_output  ->  /runtime_output
+```
+
+Use `/runtime_output` for generated artifacts such as:
+
+- vision debug images
+- lidar snapshots
+- GPS captures
+- plots
+- logs
+
+Students should not write generated files into `/ros2_ws/src`. That source
+mount stays read-only on purpose.
+
 ## Sanity Check
 
 Run one command from the repository root:

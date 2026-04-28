@@ -23,10 +23,18 @@ def model_data_files() -> list[tuple[str, list[str]]]:
     return data_files
 
 
+def launch_files() -> list[tuple[str, list[str]]]:
+    launch_paths = sorted(str(path) for path in Path("launch").glob("*.launch.py"))
+    if not launch_paths:
+        return []
+    return [(f"share/{PACKAGE_NAME}/launch", launch_paths)]
+
+
 setup(
     data_files=[
         ("share/ament_index/resource_index/packages", [f"resource/{PACKAGE_NAME}"]),
         (f"share/{PACKAGE_NAME}", ["package.xml"]),
+        *launch_files(),
         *model_data_files(),
     ],
 )

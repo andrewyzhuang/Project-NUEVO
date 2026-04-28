@@ -9,6 +9,7 @@ import rclpy
 from rclpy.node import Node
 
 from vision.camera_utils import ManagedCamera
+from vision.debug_utils import DetectionDebugWriter
 from vision.model_utils import (
     DetectedObject,
     YoloNcnnDetector,
@@ -26,7 +27,7 @@ CLASSES_OF_INTEREST = [
     "stop sign",
     "person",
     # "car",
-    # "giraffe",
+    # "bus",
 ]
 
 DEFAULT_CLASS_FILTER = ",".join(CLASSES_OF_INTEREST)
@@ -43,8 +44,8 @@ class VisionNode(Node):
         self.declare_parameter("camera_device", "/dev/video10")
         self.declare_parameter("camera_width", 640)
         self.declare_parameter("camera_height", 480)
-        self.declare_parameter("camera_fps", 5.0)
-        self.declare_parameter("process_rate_hz", 5.0)
+        self.declare_parameter("camera_fps", 15.0)
+        self.declare_parameter("process_rate_hz", 4.0)
         self.declare_parameter("model_path", str(model_default))
         self.declare_parameter("model_imgsz", 416)
         self.declare_parameter("confidence_threshold", 0.25)
@@ -54,6 +55,13 @@ class VisionNode(Node):
         self.declare_parameter("ncnn_threads", 4)
         self.declare_parameter("reconnect_delay_sec", 1.0)
         self.declare_parameter("log_interval_sec", 5.0)
+        self.declare_parameter("debug_save_enabled", False)
+        self.declare_parameter("debug_output_dir", "/runtime_output/vision")
+        self.declare_parameter("debug_save_rate_hz", 1.0)
+        self.declare_parameter("debug_save_only_on_detection", True)
+        self.declare_parameter("debug_save_latest", True)
+        self.declare_parameter("debug_save_timestamped", False)
+        self.declare_parameter("debug_max_timestamped_images", 100)
 
         self._camera_device = str(self.get_parameter("camera_device").value)
         self._camera_width = int(self.get_parameter("camera_width").value)
@@ -77,6 +85,16 @@ class VisionNode(Node):
             fps=self._camera_fps,
             reconnect_delay_sec=self._reconnect_delay_sec,
             log_interval_sec=self._log_interval_sec,
+            logger=self.get_logger(),
+        )
+        self._debug_writer = DetectionDebugWriter(
+            enabled=bool(self.get_parameter("debug_save_enabled").value),
+            output_dir=str(self.get_parameter("debug_output_dir").value),
+            save_rate_hz=float(self.get_parameter("debug_save_rate_hz").value),
+            save_only_on_detection=bool(self.get_parameter("debug_save_only_on_detection").value),
+            save_latest=bool(self.get_parameter("debug_save_latest").value),
+            save_timestamped=bool(self.get_parameter("debug_save_timestamped").value),
+            max_timestamped_images=int(self.get_parameter("debug_max_timestamped_images").value),
             logger=self.get_logger(),
         )
         self._last_loop_summary = 0.0
@@ -197,6 +215,7 @@ class VisionNode(Node):
                     detected_objects=detections,
                 )
                 self._publisher.publish(message)
+                self._debug_writer.maybe_write(frame_bgr=frame, detected_objects=detections)
                 detection_count = len(message.detections)
             except Exception as exc:  # noqa: BLE001
                 self.get_logger().error(f"Vision inference failed for one frame: {exc}")
