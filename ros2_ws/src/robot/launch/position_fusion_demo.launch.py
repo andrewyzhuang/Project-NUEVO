@@ -1,7 +1,7 @@
 """
-test_position_fusion.launch.py
-================================
-Starts the position-fusion test node.
+position_fusion_demo.launch.py
+==============================
+Starts the position-fusion demo node.
 
 Prerequisite — the bridge node must already be running before launching this:
     ros2 run bridge bridge
@@ -9,9 +9,8 @@ Prerequisite — the bridge node must already be running before launching this:
 The robot will drive in a straight line for DRIVE_DISTANCE_MM, then stop and
 save a position/trajectory plot to ~/position_fusion_test_result.png.
 
-Edit GPS_OFFSET_X_MM and GPS_OFFSET_Y_MM in
-robot/test_position_fusion.py (the module at ros2_ws/src/robot/robot/) before
-running once the arena offset has been measured.
+Tune parameters directly in
+robot/examples/position_fusion_demo.py before running.
 """
 
 from launch import LaunchDescription
@@ -23,7 +22,7 @@ def generate_launch_description():
         [
             Node(
                 package="robot",
-                executable="test_position_fusion",
+                executable="position_fusion_demo",
                 name="robot",
                 output="screen",
             ),

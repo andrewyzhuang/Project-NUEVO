@@ -1,12 +1,12 @@
 """
-test_orientation_fusion.launch.py
-==================================
-Starts the orientation-fusion test node.
+orientation_fusion_demo.launch.py
+=================================
+Starts the orientation-fusion demo node.
 
 Prerequisite — the bridge node must already be running before launching this:
     ros2 run bridge bridge
 
-The robot will drive two circles, then stop and save a trajectory/heading plot
+The robot will spin in place, then stop and save a trajectory/heading plot
 to ~/fusion_test_result.png.
 
 Launch arguments:
@@ -35,7 +35,7 @@ def generate_launch_description():
             ),
             Node(
                 package="robot",
-                executable="test_orientation_fusion",
+                executable="orientation_fusion_demo",
                 name="robot",
                 output="screen",
                 condition=IfCondition(LaunchConfiguration("launch_robot_node")),

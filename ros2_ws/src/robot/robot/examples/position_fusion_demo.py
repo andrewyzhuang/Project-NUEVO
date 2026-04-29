@@ -1,6 +1,6 @@
 """
-test_position_fusion.py — GPS-anchored position fusion alpha-tuning test
-=========================================================================
+position_fusion_demo.py — GPS-anchored position fusion demo
+============================================================
 Purpose
 -------
 Helps students tune ``POSITION_FUSION_ALPHA`` by driving the robot in a straight
@@ -40,7 +40,7 @@ Tuning guide
   directly to GPS each kinematics tick (useful to verify GPS accuracy in isolation).
 
 Usage:
-    ros2 launch robot test_position_fusion.launch.py
+    ros2 launch robot position_fusion_demo.launch.py
 """
 
 from __future__ import annotations
@@ -138,7 +138,7 @@ def _drive_straight(robot: Robot, rec: _Record) -> None:
     _SERVICE_WAIT_S = 10.0
     if not robot._set_state_client.wait_for_service(timeout_sec=_SERVICE_WAIT_S):
         raise RuntimeError(
-            f"[position_test] /set_firmware_state service not available after "
+            f"[position_fusion_demo] /set_firmware_state service not available after "
             f"{_SERVICE_WAIT_S:.0f}s. Start the bridge first:\n"
             "  ros2 run bridge bridge"
         )
@@ -149,7 +149,7 @@ def _drive_straight(robot: Robot, rec: _Record) -> None:
     while robot.get_state() == 0:   # 0 = INIT, not in FirmwareState enum
         if time.monotonic() - _t0 > _IDLE_WAIT_S:
             raise RuntimeError(
-                f"[position_test] Firmware still in INIT after {_IDLE_WAIT_S:.0f}s."
+                f"[position_fusion_demo] Firmware still in INIT after {_IDLE_WAIT_S:.0f}s."
             )
         time.sleep(0.1)
 
@@ -157,7 +157,7 @@ def _drive_straight(robot: Robot, rec: _Record) -> None:
     if robot.get_state() not in (int(FirmwareState.IDLE), int(FirmwareState.RUNNING)):
         if not robot.set_state(FirmwareState.IDLE):
             raise RuntimeError(
-                f"[position_test] Could not reset firmware to IDLE "
+                f"[position_fusion_demo] Could not reset firmware to IDLE "
                 f"(current state: {robot.get_state()})."
             )
 
@@ -170,7 +170,7 @@ def _drive_straight(robot: Robot, rec: _Record) -> None:
         while robot.get_state() != int(FirmwareState.RUNNING):
             if time.monotonic() > _deadline:
                 raise RuntimeError(
-                    f"[position_test] Firmware did not reach RUNNING "
+                    f"[position_fusion_demo] Firmware did not reach RUNNING "
                     f"(state: {robot.get_state()})."
                 )
             time.sleep(0.05)
@@ -191,7 +191,7 @@ def _drive_straight(robot: Robot, rec: _Record) -> None:
             break
         if time.monotonic() - _t_reset > _RESET_TIMEOUT_S:
             print(
-                f"[pos_fusion_test] WARNING — odometry did not settle to zero after "
+                f"[position_fusion_demo] WARNING — odometry did not settle to zero after "
                 f"{_RESET_TIMEOUT_S:.0f}s (last value: {_ox:.1f}, {_oy:.1f} mm). "
                 f"Proceeding with current position as reference origin."
             )
@@ -223,15 +223,15 @@ def _drive_straight(robot: Robot, rec: _Record) -> None:
     gps_x_ref_set = False
 
     print(
-        f"[pos_fusion_test] Driving in world-Y direction for {DRIVE_DISTANCE_MM:.0f} mm "
+        f"[position_fusion_demo] Driving in world-Y direction for {DRIVE_DISTANCE_MM:.0f} mm "
         f"at {DRIVE_SPEED_MM_S:.0f} mm/s  alpha={POSITION_FUSION_ALPHA}\n"
-        f"[pos_fusion_test] GPS frame will be translated to match odometry "
+        f"[position_fusion_demo] GPS frame will be translated to match odometry "
         f"at first acquisition.\n"
-        f"[pos_fusion_test] If GPS is not acquired within {DRIVE_DISTANCE_MM:.0f} mm, "
+        f"[position_fusion_demo] If GPS is not acquired within {DRIVE_DISTANCE_MM:.0f} mm, "
         f"the robot will continue up to {GPS_SEARCH_EXTRA_MM:.0f} mm further to find "
         f"GPS coverage (total cap: {max_dist:.0f} mm)."
         if GPS_SEARCH_EXTRA_MM > 0 else
-        f"[pos_fusion_test] Driving in world-Y direction for {DRIVE_DISTANCE_MM:.0f} mm "
+        f"[position_fusion_demo] Driving in world-Y direction for {DRIVE_DISTANCE_MM:.0f} mm "
         f"at {DRIVE_SPEED_MM_S:.0f} mm/s  alpha={POSITION_FUSION_ALPHA}"
     )
 
@@ -256,7 +256,7 @@ def _drive_straight(robot: Robot, rec: _Record) -> None:
             gps_acq_odom_y = odom_y
         #    dist_at_acq = math.hypot(odom_x - odom_x0, odom_y - odom_y0)
         #    print(
-        #        f"[pos_fusion_test] GPS acquired at {dist_at_acq:.0f} mm — learned offset "
+        #        f"[position_fusion_demo] GPS acquired at {dist_at_acq:.0f} mm — learned offset "
         #        f"({learned_offset_x:.1f}, {learned_offset_y:.1f}) mm. "
         #        f"Driving {DRIVE_DISTANCE_MM:.0f} mm more inside GPS range."
         #    )
@@ -279,7 +279,7 @@ def _drive_straight(robot: Robot, rec: _Record) -> None:
             plot_fused_x0 = fused_x_mm
             gps_x_ref_set = True
             print(
-                f"[pos_fusion_test] GPS X reference set: "
+                f"[position_fusion_demo] GPS X reference set: "
                 f"odom_x={odom_x:.1f} mm, fused_x={fused_x_mm:.1f} mm "
                 f"(GPS X offset absorbed = {fused_x_mm - odom_x:.1f} mm)"
             )
@@ -312,13 +312,13 @@ def _drive_straight(robot: Robot, rec: _Record) -> None:
             # Safety cap: hit total distance limit before completing the run.
             if gps_aligned:
                 print(
-                    f"[pos_fusion_test] WARNING — GPS coverage ended before "
+                    f"[position_fusion_demo] WARNING — GPS coverage ended before "
                     f"{DRIVE_DISTANCE_MM:.0f} mm of fused data could be collected. "
                     f"Increase GPS_SEARCH_EXTRA_MM or reposition the robot closer to the tag."
                 )
             else:
                 print(
-                    f"[pos_fusion_test] WARNING — GPS was never acquired during the "
+                    f"[position_fusion_demo] WARNING — GPS was never acquired during the "
                     f"{max_dist:.0f} mm drive. The fused position equals raw odometry "
                     f"throughout; no fusion comparison is available in the plot."
                 )
@@ -332,7 +332,7 @@ def _drive_straight(robot: Robot, rec: _Record) -> None:
             and dist_traveled >= DRIVE_DISTANCE_MM
         ):
             print(
-                f"[pos_fusion_test] GPS not yet acquired at {dist_traveled:.0f} mm. "
+                f"[position_fusion_demo] GPS not yet acquired at {dist_traveled:.0f} mm. "
                 f"Continuing up to {GPS_SEARCH_EXTRA_MM:.0f} mm more to find GPS "
                 f"coverage…"
             )
@@ -350,7 +350,7 @@ def _drive_straight(robot: Robot, rec: _Record) -> None:
     t_end = time.monotonic()
     robot.stop()
     print(
-        f"[pos_fusion_test] Done — travelled {dist_traveled:.1f} mm "
+        f"[position_fusion_demo] Done — travelled {dist_traveled:.1f} mm "
         f"in {t_end - t_start:.1f} s"
     )
 
@@ -456,9 +456,9 @@ def _plot_results(rec: _Record) -> None:
 
     try:
         plt.savefig(_PLOT_PATH, dpi=150)
-        print(f"[pos_fusion_test] Plot saved → {_PLOT_PATH}")
+        print(f"[position_fusion_demo] Plot saved → {_PLOT_PATH}")
     except Exception as exc:
-        print(f"[pos_fusion_test] Could not save plot: {exc}")
+        print(f"[position_fusion_demo] Could not save plot: {exc}")
 
     try:
         plt.show()
@@ -500,7 +500,7 @@ def main(args=None) -> None:
 
     class _TestNode(Node):
         def __init__(self) -> None:
-            super().__init__("position_fusion_test")
+            super().__init__("position_fusion_demo")
             self.robot = _Robot(self)
 
     node = _TestNode()

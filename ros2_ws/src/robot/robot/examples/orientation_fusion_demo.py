@@ -1,5 +1,5 @@
 """
-test_orientation_fusion.py — complementary-filter orientation test
+orientation_fusion_demo.py — complementary-filter orientation demo
 ==================================================================
 Spins the robot in place through 180 degrees, recording odometry theta and the
 complementary-filter (magnetometer-blended) heading at every tick.
@@ -8,8 +8,8 @@ After the run, matplotlib plots:
   2. Heading comparison — raw odometry vs fused heading over time
   3. Fusion correction — per-sample difference (fused − odometry)
 
-Usage (replace the run() import in main.py, or use the dedicated launch file):
-    ros2 launch robot test_orientation_fusion.launch.py
+Usage:
+    ros2 launch robot orientation_fusion_demo.launch.py
 
 Tuning parameters at the top of this file:
     SPIN_ANGLE_DEG    — total in-place rotation angle (degrees)
@@ -96,7 +96,7 @@ def _spin_in_place(robot: Robot, rec: _Record) -> None:
     _SERVICE_WAIT_S = 10.0
     if not robot._set_state_client.wait_for_service(timeout_sec=_SERVICE_WAIT_S):
         raise RuntimeError(
-            f"[orientation_fusion_test] /set_firmware_state service not available after "
+            f"[orientation_fusion_demo] /set_firmware_state service not available after "
             f"{_SERVICE_WAIT_S:.0f}s. Start the bridge first:\n"
             "  ros2 run bridge bridge"
         )
@@ -107,7 +107,7 @@ def _spin_in_place(robot: Robot, rec: _Record) -> None:
     while robot.get_state() == 0:   # 0 = INIT, not in FirmwareState enum
         if time.monotonic() - _t0 > _IDLE_WAIT_S:
             raise RuntimeError(
-                f"[orientation_fusion_test] Firmware still in INIT after {_IDLE_WAIT_S:.0f}s."
+                f"[orientation_fusion_demo] Firmware still in INIT after {_IDLE_WAIT_S:.0f}s."
             )
         time.sleep(0.1)
 
@@ -115,7 +115,7 @@ def _spin_in_place(robot: Robot, rec: _Record) -> None:
     if robot.get_state() not in (int(FirmwareState.IDLE), int(FirmwareState.RUNNING)):
         if not robot.set_state(FirmwareState.IDLE):
             raise RuntimeError(
-                f"[orientation_fusion_test] Could not reset firmware to IDLE "
+                f"[orientation_fusion_demo] Could not reset firmware to IDLE "
                 f"(current state: {robot.get_state()})."
             )
 
@@ -128,14 +128,14 @@ def _spin_in_place(robot: Robot, rec: _Record) -> None:
         while robot.get_state() != int(FirmwareState.RUNNING):
             if time.monotonic() > _deadline:
                 raise RuntimeError(
-                    f"[orientation_fusion_test] Firmware did not reach RUNNING "
+                    f"[orientation_fusion_demo] Firmware did not reach RUNNING "
                     f"(state: {robot.get_state()})."
                 )
             time.sleep(0.05)
     robot.reset_odometry()
     if not robot.wait_for_odometry_reset(timeout=2.0):
         raise RuntimeError(
-            "[orientation_fusion_test] Timed out waiting for firmware to confirm odometry reset."
+            "[orientation_fusion_demo] Timed out waiting for firmware to confirm odometry reset."
         )
 
     # Capture initial values — both should be ~0 after reset, but subtract
@@ -148,9 +148,9 @@ def _spin_in_place(robot: Robot, rec: _Record) -> None:
     next_tick = t_start
 
     print(
-        f"[orientation_fusion_test] Spinning in place {SPIN_ANGLE_DEG:.0f}°: "
+        f"[orientation_fusion_demo] Spinning in place {SPIN_ANGLE_DEG:.0f}°: "
         f"v=0.0 mm/s, ω={ANGULAR_DEG_S:.1f}°/s, α={ORIENTATION_FUSION_ALPHA}\n"
-        f"[orientation_fusion_test] Expected duration: {total_duration:.1f} s"
+        f"[orientation_fusion_demo] Expected duration: {total_duration:.1f} s"
     )
 
     while True:
@@ -174,7 +174,7 @@ def _spin_in_place(robot: Robot, rec: _Record) -> None:
             next_tick = time.monotonic()
 
     robot.stop()
-    print("[orientation_fusion_test] In-place spin complete — stopping.")
+    print("[orientation_fusion_demo] In-place spin complete — stopping.")
 
 
 # =============================================================================
@@ -227,9 +227,9 @@ def _plot_results(rec: _Record) -> None:
 
     try:
         plt.savefig(_PLOT_PATH, dpi=150)
-        print(f"[orientation_fusion_test] Plot saved → {_PLOT_PATH}")
+        print(f"[orientation_fusion_demo] Plot saved → {_PLOT_PATH}")
     except Exception as exc:
-        print(f"[orientation_fusion_test] Could not save plot: {exc}")
+        print(f"[orientation_fusion_demo] Could not save plot: {exc}")
 
     try:
         plt.show()
@@ -269,7 +269,7 @@ def main(args=None) -> None:
 
     class _TestNode(Node):
         def __init__(self) -> None:
-            super().__init__("orientation_fusion_test")
+            super().__init__("orientation_fusion_demo")
             self.robot = _Robot(self)
 
     node = _TestNode()

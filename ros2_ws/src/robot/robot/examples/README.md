@@ -1,12 +1,12 @@
 # Examples
 
-Worked examples for the Robot API. Each one is a complete, runnable program.
+Worked examples and diagnostic demos for the Robot API.
 
 ---
 
 ## How to Run an Example
 
-Each example is a self-contained `main.py` replacement. To run one:
+Most examples are self-contained `main.py` replacements. To run one:
 
 1. Copy the example file over `main.py`:
 > **Tip:** Before replacing `main.py`, save a copy so you can restore it later.
@@ -19,6 +19,9 @@ ros2 run robot robot
 
 The `robot_node.py` process calls `run(robot)` for you — you do not need to
 call it yourself or change any other file.
+
+Diagnostic demos are separate ROS executables with their own launch files. Run
+those directly with `ros2 launch`.
 
 
 ---
@@ -33,6 +36,7 @@ Work through the examples in order. Each one builds on the previous.
 | 2 | [`motion_basics.py`](motion_basics.py) | Robot setup flow, move_forward, turn_by, get_pose, move_to |
 | 3 | [`pure_pursuit.py`](pure_pursuit.py) | Multi-waypoint path following, parameter tuning, densify_polyline |
 | 4 | [`manipulation.py`](manipulation.py) | Servo + stepper + DC position mode in a coordinated pick task |
+| 5 | [`obstacle_avoidance.py`](obstacle_avoidance.py) | Current lane-switch obstacle avoidance reference using lidar |
 | — | [`uml_statechart_guide.md`](uml_statechart_guide.md) | How to draw a UML statechart for your mission |
 | — | [`ai_agent_codegen.md`](ai_agent_codegen.md) | Generate `main.py` from a UML statechart using an AI agent |
 
@@ -77,12 +81,54 @@ Key calls: `set_servo()`, `step_move()`, `step_home()`, `set_motor_position()`,
 
 ---
 
-### 5. AI Agent Code Generation
+### 5. Obstacle Avoidance Reference
+Mirrors the currently supported lane-switch obstacle-avoidance flow used by the
+released lab code. Use this as the starting point when you need the existing
+lidar avoidance behavior without editing the released `main.py`.
+
+Key calls: `_nav_follow_pp_path()`, `planner.set_path()`,
+`_nav_follow_pp_path_loop()`
+
+---
+
+### 6. AI Agent Code Generation
 A guide for AI agents (e.g. Claude) explaining how to read a UML statechart
 diagram and produce a correct `main.py` FSM. Use this when you have a
 state diagram for your mission and want to auto-generate the starting code.
 
 See [`ai_agent_codegen.md`](ai_agent_codegen.md) for the full instructions.
+
+---
+
+## Diagnostic Demos
+
+These are not `main.py` replacements. They launch as dedicated ROS nodes and
+save tuning plots back to the host machine.
+
+| File | What It Teaches |
+|------|-----------------|
+| [`orientation_fusion_demo.py`](orientation_fusion_demo.py) | Magnetometer + odometry heading fusion diagnostic with saved plot |
+| [`position_fusion_demo.py`](position_fusion_demo.py) | GPS + odometry position fusion diagnostic with saved plot |
+
+### Orientation Fusion Demo
+Spins the robot in place and compares raw odometry heading against the fused
+magnetometer-corrected heading.
+
+Run:
+
+```bash
+ros2 launch robot orientation_fusion_demo.launch.py
+```
+
+### Position Fusion Demo
+Drives a straight line while comparing odometry-only position to the GPS-fused
+position estimate.
+
+Run:
+
+```bash
+ros2 launch robot position_fusion_demo.launch.py
+```
 
 ---
 

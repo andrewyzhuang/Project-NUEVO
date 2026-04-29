@@ -3,7 +3,7 @@
 Student-facing control layer for the MAE 162 robotics platform.
 
 If this README and the code ever disagree, treat
-[`robot.py`](robot.py) as the source of truth.
+[`robot/robot.py`](robot/robot.py) as the source of truth.
 
 ---
 
@@ -11,18 +11,77 @@ If this README and the code ever disagree, treat
 
 ```
 ┌──────────────────────────────────────────────┐
-│  Layer 3 — Path Planner                       │  pure pursuit, APF
+│  Layer 3 — Path Planner                      │  pure pursuit, APF
 ├──────────────────────────────────────────────┤
 │  Layer 2 — main.py  ← you work here          │  your FSM + helpers
 ├──────────────────────────────────────────────┤
-│  Layer 1 — Robot API  (robot.py)              │  wraps all ROS topics
+│  Layer 1 — Robot API  (robot.py)             │  wraps all ROS topics
 ├──────────────────────────────────────────────┤
-│  bridge node                                  │  ROS ↔ firmware TLV
+│  bridge node                                 │  ROS ↔ firmware TLV
 └──────────────────────────────────────────────┘
 ```
 
 `Robot` is not a ROS node. It uses the node passed to it at construction to
 create publishers and subscriptions. The bridge node must already be running.
+
+---
+
+## Node and Planner Design
+
+`robot_node.py` is the only ROS node in this package. It sets up ROS, builds a
+`Robot` wrapper around the live node, and then calls `main.run(robot)`.
+
+The package is organized in three layers:
+
+```text
+Layer 3: planners in path_planner.py
+Layer 2: student FSM and helpers in main.py
+Layer 1: Robot API in robot.py
+```
+
+The execution model is:
+
+- ROS spin thread updates cached robot state from topics
+- `main.py` runs an explicit FSM loop
+- optional navigation threads call planner `compute_velocity()` and send drive
+  commands through the Robot API
+
+Path planners are pure algorithm classes. They do not own ROS subscriptions or
+threads.
+
+## Planner Status
+
+Supported planners in the current tree:
+
+- `PurePursuitPlanner` — public pure-pursuit path following
+- `APFPlanner` — public obstacle-aware path following direction for future work
+- `PurePursuitPlannerWithAvoidance` — internal lane-switch obstacle avoidance
+  kept for released lab compatibility
+
+Removed legacy planners:
+
+- DWA obstacle avoidance
+- the second pure-pursuit avoidance prototype
+
+## Current Obstacle Avoidance
+
+Released Lab 5 obstacle avoidance uses the internal
+`PurePursuitPlannerWithAvoidance` planner in [`robot/path_planner.py`](robot/path_planner.py).
+
+The supported reference example is:
+
+- [`robot/examples/obstacle_avoidance.py`](robot/examples/obstacle_avoidance.py)
+
+The current supported flow is:
+
+1. Configure odometry and optional tracked-tag localization in `main.py`
+2. Build a waypoint path with `densify_polyline(...)`
+3. Call `robot._nav_follow_pp_path(...)`
+4. Call `robot.planner.set_path(path)`
+5. Call `robot._nav_follow_pp_path_loop()` on each FSM tick
+
+This is kept for released lab compatibility. For future work, `APFPlanner` is
+the cleaner direction.
 
 ---
 
@@ -176,6 +235,6 @@ robot.set_unit(Unit.INCH)  # all length/velocity in inches
 
 ## Where to Go Next
 
-- **New to the examples?** → [`examples/README.md`](examples/README.md)
-- **Need parameter details or ROS context?** → [`API_REFERENCE.md`](API_REFERENCE.md)
-- **Source of truth for all method signatures** → [`robot.py`](robot.py)
+- **New to the examples?** → [`robot/examples/README.md`](robot/examples/README.md)
+- **Need parameter details or ROS context?** → [`robot/API_REFERENCE.md`](robot/API_REFERENCE.md)
+- **Source of truth for all method signatures** → [`robot/robot.py`](robot/robot.py)
