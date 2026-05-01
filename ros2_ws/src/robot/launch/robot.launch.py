@@ -1,8 +1,12 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.actions import IncludeLaunchDescription
 from launch.conditions import IfCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import PathJoinSubstitution
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
@@ -26,20 +30,21 @@ def generate_launch_description():
             name="bridge",
             output="screen",
         ),
-        Node(
-            package="rplidar_ros",
-            executable="rplidar_c1_node",
-            name="rplidar_node",
-            output="screen",
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                PathJoinSubstitution(
+                    [FindPackageShare("rplidar_ros"), "launch", "rplidar_c1.launch.py"]
+                )
+            ),
             condition=IfCondition(enable_lidar),
-            parameters=[{
-                "channel_type": "serial",
+            launch_arguments={
                 "serial_port": "/dev/rplidar",
-                "serial_baudrate": 460800,
+                "serial_baudrate": "460800",
                 "frame_id": "laser_frame",
-                "angle_compensate": True,
+                "topic_name": "scan",
                 "scan_mode": "Standard",
-            }],
+                "angle_compensate": "true",
+            }.items(),
         ),
         Node(
             package="robot",
