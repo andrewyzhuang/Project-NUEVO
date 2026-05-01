@@ -245,6 +245,8 @@ class Robot:
         self._limit_edges: int = 0
         self._have_io_input: bool = False
         self._obstacles_mm: np.ndarray = np.float64([])
+        self._lidar_ranges_mm: np.ndarray = np.float64([])
+        self._lidar_angles: np.ndarray = np.float64([])
         self._odom_traj: list[tuple[float, float]] = []
         self._fused_traj: list[tuple[float, float]] = []
 
@@ -518,13 +520,25 @@ class Robot:
         angles = msg.angle_min + np.arange(len(msg.ranges)) * msg.angle_increment
         ranges = np.array(msg.ranges)
 
-        valid = np.isfinite(ranges) & (ranges > msg.range_min) & (ranges < msg.range_max)
-        angles = angles[valid]
-        ranges = ranges[valid]
+        # Apply disparity extender to "extend" obstacles by half of the robot's width.
+        from robot.path_planner import DisparityExtender
+        extender = DisparityExtender(robot_width_mm=200.0, disparity_threshold_mm=240.0)
+        
+        ranges_finite = np.where(np.isfinite(ranges), ranges, msg.range_max)
+        ranges_extended_mm = extender.process(ranges_finite * 1000.0, msg.angle_increment)
+        
+        with self._lock:
+            self._lidar_ranges_mm = ranges_extended_mm
+            self._lidar_angles = angles
 
-        # Convert polar to Cartesian (robot frame, metres -> mm)
-        x = ranges * np.cos(angles)
-        y = ranges * np.sin(angles)
+        ranges_extended = ranges_extended_mm / 1000.0
+        # ... (rest of filtering)
+        valid = np.isfinite(ranges_extended) & (ranges_extended > msg.range_min) & (ranges_extended < msg.range_max)
+        angles_filt = angles[valid]
+        ranges_filt = ranges_extended[valid]
+
+        x = ranges_filt * np.cos(angles_filt)
+        y = ranges_filt * np.sin(angles_filt)
         with self._lock:
             self._obstacles_mm = np.float64(
                 np.concatenate([x[:, np.newaxis], y[:, np.newaxis]], axis=1)
@@ -2105,6 +2119,36 @@ class Robot:
             self.stop()
             return "IDLE"
 
+        return "MOVING"
+
+    def _init_ftg_planner(
+        self,
+        max_speed: float = 200.0,
+        min_safe_dist: float = 300.0,
+        safe_full_speed_dist: float = 1000.0,
+        max_angular_speed: float = 2.0,
+    ) -> None:
+        """Initialize the Follow the Gap planner."""
+        from robot.path_planner import FollowTheGapPlanner
+        self.planner = FollowTheGapPlanner(
+            max_speed=max_speed,
+            min_safe_dist=min_safe_dist,
+            safe_full_speed_dist=safe_full_speed_dist,
+            max_angular_speed=max_angular_speed,
+        )
+
+    def _nav_follow_ftg_loop(self) -> str:
+        """FSM tick for Follow the Gap logic."""
+        with self._lock:
+            ranges = self._lidar_ranges_mm.copy()
+            angles = self._lidar_angles.copy()
+
+        if len(ranges) == 0:
+            self.stop()
+            return "MOVING"
+
+        v, w = self.planner.compute_velocity(ranges, angles)
+        self.set_velocity(v, math.degrees(w))
         return "MOVING"
 
     def _draw_lidar_obstacles(self):

@@ -846,6 +846,125 @@ class DWAPlanner():
 
 
 # =============================================================================
+# Disparity Extender
+# =============================================================================
+
+class DisparityExtender:
+    """
+    Implements a disparity-extender algorithm for 1D LiDAR scans.
+    
+    It identifies "disparities" (sudden jumps in range) and "extends" the closer
+    distance to neighboring samples to account for the robot's physical width.
+    This effectively thickens obstacles in the angular space.
+    """
+    def __init__(self, robot_width_mm: float, disparity_threshold_mm: float = 240.0):
+        self.robot_width = robot_width_mm # half of the full robot width
+        self.disparity_threshold = disparity_threshold_mm
+
+    def process(self, ranges: np.ndarray, angle_increment: float) -> np.ndarray:
+        """
+        Apply the disparity extender to a set of ranges.
+        
+        ranges          — 1D array of ranges (in mm)
+        angle_increment — angular step between samples (in radians)
+        """
+        new_ranges = np.copy(ranges)
+        n = len(ranges)
+        if n < 2:
+            return new_ranges
+
+        for i in range(n - 1):
+            d1 = ranges[i]
+            d2 = ranges[i+1]
+
+            if abs(d1 - d2) > self.disparity_threshold:
+                nearer = min(d1, d2)
+                # Avoid division by zero and handle very close objects
+                if nearer < 1e-6:
+                    continue
+                
+                # angle = atan(width / dist)
+                angle_to_cover = math.atan2(self.robot_width, nearer)
+                samples_to_cover = int(math.ceil(angle_to_cover / angle_increment))
+
+                if d1 < d2:
+                    # Extend d1 to the right (into d2's region)
+                    start = i + 1
+                    end = min(n, i + 1 + samples_to_cover)
+                    new_ranges[start:end] = np.minimum(new_ranges[start:end], d1)
+                else:
+                    # Extend d2 to the left (into d1's region)
+                    start = max(0, i - samples_to_cover + 1)
+                    end = i + 1
+                    new_ranges[start:end] = np.minimum(new_ranges[start:end], d2)
+
+        return new_ranges
+
+
+class FollowTheGapPlanner(PathPlanner):
+    """
+    Implements a simple Follow the Gap (FTG) / Gap Follower strategy.
+    
+    It chooses the direction of the furthest reachable distance in the LiDAR
+    scan (processed by DisparityExtender) and scales velocity based on the
+    distance directly in front of the robot.
+    """
+    def __init__(
+        self,
+        max_speed: float = 200.0,
+        min_safe_dist: float = 300.0,
+        safe_full_speed_dist: float = 1000.0,
+        max_angular_speed: float = 2.0,
+    ):
+        self.max_speed = max_speed
+        self.min_safe_dist = min_safe_dist
+        self.safe_full_speed_dist = safe_full_speed_dist
+        self.max_angular_speed = max_angular_speed
+
+    def compute_velocity(
+        self,
+        ranges: np.ndarray,
+        angles: np.ndarray,
+    ) -> tuple[float, float]:
+        """
+        Return (linear_mm_s, angular_rad_s) based on FTG.
+        
+        ranges — 1D array of processed ranges in mm
+        angles — 1D array of corresponding angles in radians
+        """
+        if len(ranges) == 0:
+            return 0.0, 0.0
+
+        # 1. Find direction of furthest distance
+        best_idx = np.argmax(ranges)
+        target_angle = angles[best_idx]
+
+        # 2. Reference velocity scaling based on forward distance
+        # Filter for points directly in front (-10 to +10 degrees)
+        front_mask = np.abs(angles) < math.radians(10.0)
+        if np.any(front_mask):
+            front_dist = np.min(ranges[front_mask])
+        else:
+            # If no points in front (e.g., all filtered out), assume blocked or use target
+            front_dist = 0.0
+
+        if front_dist < self.min_safe_dist:
+            v = 0.0
+        elif front_dist > self.safe_full_speed_dist:
+            v = self.max_speed
+        else:
+            # Linear scaling
+            v = self.max_speed * (front_dist - self.min_safe_dist) / (self.safe_full_speed_dist - self.min_safe_dist)
+
+        # 3. Direction (angular velocity)
+        # Steering proportional to target angle
+        w = target_angle * 1.5  # Gain Kp = 1.5
+        w = np.clip(w, -self.max_angular_speed, self.max_angular_speed)
+
+        return v, w
+
+
+# =============================================================================
 # Helper
 # =============================================================================
 

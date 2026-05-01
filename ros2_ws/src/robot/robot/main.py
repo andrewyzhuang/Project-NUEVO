@@ -68,38 +68,16 @@ def run(robot: Robot) -> None:
         if state == "INIT":
             start_robot(robot)
             print("[FSM] INIT (odometry reset)")
-            # center lane
-            # path_control_points = [
-            #     (0.0,   0.0),
-            #     (0.0, 2500.0),
-            #     (1000.0, 2500.0),
-            # ]
-            # left lane
-            path_control_points = [
-                (300.0,   0.0),
-                (300.0, 2500.0),
-                (1300.0, 2500.0),
-            ]
-
-            path = densify_polyline(path_control_points, spacing=400.0)
-
-            robot._nav_follow_pp_path(
-                lookahead_distance=100.0,
-                max_linear_speed=140.0,
-                max_angular_speed=1.5,
-                goal_tolerance=20.0,
-                obstacles_range=450.0,
-                view_angle=math.radians(70.0),
-                safe_dist=250.0,
-                avoidance_delay=150,
-                alpha_Ld=0.7,
-                offset=270.0,
-                lane_width=500.0,
-                obstacle_avoidance=True,
-                x_L=300.0,
+            
+            # Initialize Follow the Gap planner
+            robot._init_ftg_planner(
+                max_speed=200.0,
+                min_safe_dist=300.0,
+                safe_full_speed_dist=1200.0,
+                max_angular_speed=2.5,
             )
-            robot.planner.set_path(path)
-            print("Path is ready, Entering IDLE state.")
+            
+            print("FTG Planner is ready, Entering IDLE state.")
             print("[FSM] IDLE - Press BTN_1 to enter MOVING state.")
             state = "IDLE"
 
@@ -107,8 +85,11 @@ def run(robot: Robot) -> None:
             show_idle_leds(robot)
             robot._draw_lidar_obstacles()
             if robot.get_button(Button.BTN_1):
-                print("Start Moving!")
+                print("Start Moving (FTG)!")
                 print("[FSM] MOVING")
+                # Record start position for termination condition
+                start_x, start_y, _ = robot.get_pose()
+                robot_start_pos = (start_x, start_y)
                 state = "MOVING"
             if robot.get_button(Button.BTN_2):
                 print("BTN_2 pressed. Stopping robot and saving trajectory.")
@@ -116,10 +97,17 @@ def run(robot: Robot) -> None:
 
         elif state == "MOVING":
             show_moving_leds(robot)
-            # if next_tick % 0.5 < period: # print every half second
-            #     robot._draw_lidar_obstacles()
-            #     print("Obstacle figure updated.")
-            state = robot._nav_follow_pp_path_loop()
+            
+            # Check termination condition: distance traveled
+            cur_x, cur_y, _ = robot.get_pose()
+            dist_traveled = math.hypot(cur_x - robot_start_pos[0], cur_y - robot_start_pos[1])
+            
+            if dist_traveled > 3000.0: # Stop after 3 meters
+                print(f"Distance limit reached ({dist_traveled:.1f}mm). Stopping.")
+                robot.stop()
+                state = "IDLE"
+            else:
+                state = robot._nav_follow_ftg_loop()
 
         # FSM refresh rate control
         next_tick += period
