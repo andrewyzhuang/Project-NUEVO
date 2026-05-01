@@ -48,6 +48,10 @@ services:
       - NUEVO_USERS_FILE=/data/users.json
       - NUEVO_MOCK=1
       - NUEVO_MOCK_ODOMETRY=1
+      - NUEVO_MOCK_LIDAR=1
+      # rplidar_ros requires a host library (libfastcdr) not present in the VM
+      # image — exclude it from the VM build. It is built on the real RPi only.
+      - NUEVO_ROS_PACKAGES=robot sensors bridge bridge_interfaces
 
     restart: unless-stopped
 
@@ -55,7 +59,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "bash -lc 'source /opt/ros/jazzy/setup.bash && test -f /ros2_ws/install/setup.bash && source /ros2_ws/install/setup.bash && for package in robot sensors bridge bridge_interfaces vision rplidar_ros; do ros2 pkg prefix \"$$package\" >/dev/null || exit 1; done'",
+          "bash -lc 'source /opt/ros/jazzy/setup.bash && test -f /ros2_ws/install/setup.bash && source /ros2_ws/install/setup.bash && for package in robot sensors bridge bridge_interfaces; do ros2 pkg prefix \"$$package\" >/dev/null || exit 1; done'",
         ]
       interval: 10s
       timeout: 5s
