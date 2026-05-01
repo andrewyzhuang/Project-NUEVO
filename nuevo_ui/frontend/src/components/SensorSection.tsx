@@ -723,49 +723,27 @@ function OdometryCard({ kinematics, odomParams }: { kinematics: KinematicsData; 
         </div>
       </div>
 
-      <div className="space-y-1">
-        {/* X  Y  θ on one line */}
-        <div className="flex justify-between gap-1">
-          {[['X', distFmt(kinematics.x)], ['Y', distFmt(kinematics.y)], ['θ', `${thetaDeg.toFixed(1)}°`]].map(([lbl, val]) => (
-            <div key={lbl} className="flex-1 flex flex-col items-center rounded bg-white/5 px-1 py-0.5">
-              <span className="text-[9px] text-white/40 leading-none">{lbl}</span>
-              <span className="text-[10px] font-mono text-white leading-tight">{val}</span>
-            </div>
-          ))}
+      <div className="space-y-1 text-xs">
+        <div className="flex gap-4">
+          <span className="text-white/50">X <span className="font-mono text-white">{distFmt(kinematics.x)}</span></span>
+          <span className="text-white/50">Y <span className="font-mono text-white">{distFmt(kinematics.y)}</span></span>
+          <span className="text-white/50">θ <span className="font-mono text-white">{thetaDeg.toFixed(1)}°</span></span>
         </div>
-        {/* Vx  Vy on one line */}
-        <div className="flex justify-between gap-1">
-          {[['Vx', spdFmt(kinematics.vx)], ['Vy', spdFmt(kinematics.vy)]].map(([lbl, val]) => (
-            <div key={lbl} className="flex-1 flex flex-col items-center rounded bg-white/5 px-1 py-0.5">
-              <span className="text-[9px] text-white/40 leading-none">{lbl}</span>
-              <span className="text-[10px] font-mono text-white leading-tight">{val}</span>
-            </div>
-          ))}
+        <div className="flex gap-4">
+          <span className="text-white/50">Vx <span className="font-mono text-white">{spdFmt(kinematics.vx)}</span></span>
+          <span className="text-white/50">Vy <span className="font-mono text-white">{spdFmt(kinematics.vy)}</span></span>
         </div>
         {odomParams ? (
           <>
             <div className="my-2 h-px bg-white/10" />
-            {/* Wheel Ø  Wheel Base on one line */}
-            <div className="flex justify-between gap-1">
-              {[['Wheel Ø', distFmt(odomParams.wheelDiameterMm)], ['Wheel Base', distFmt(odomParams.wheelBaseMm)]].map(([lbl, val]) => (
-                <div key={lbl} className="flex-1 flex flex-col items-center rounded bg-white/5 px-1 py-0.5">
-                  <span className="text-[9px] text-white/40 leading-none">{lbl}</span>
-                  <span className="text-[10px] font-mono text-white leading-tight">{val}</span>
-                </div>
-              ))}
+            <div className="flex gap-4">
+              <span className="text-white/50">Wheel Ø <span className="font-mono text-white">{distFmt(odomParams.wheelDiameterMm)}</span></span>
+              <span className="text-white/50">Base <span className="font-mono text-white">{distFmt(odomParams.wheelBaseMm)}</span></span>
             </div>
-            {/* Reset θ  Left Odom  Right Odom on one line */}
-            <div className="flex justify-between gap-1">
-              {[
-                ['Reset θ', `${odomParams.initialThetaDeg.toFixed(1)}°`],
-                ['Left', `M${odomParams.leftMotorNumber}${odomParams.leftMotorDirInverted ? '↑' : ''}`],
-                ['Right', `M${odomParams.rightMotorNumber}${odomParams.rightMotorDirInverted ? '↑' : ''}`],
-              ].map(([lbl, val]) => (
-                <div key={lbl} className="flex-1 flex flex-col items-center rounded bg-white/5 px-1 py-0.5">
-                  <span className="text-[9px] text-white/40 leading-none">{lbl}</span>
-                  <span className="text-[10px] font-mono text-white leading-tight">{val}</span>
-                </div>
-              ))}
+            <div className="flex gap-4">
+              <span className="text-white/50">Reset θ <span className="font-mono text-white">{odomParams.initialThetaDeg.toFixed(1)}°</span></span>
+              <span className="text-white/50">L <span className="font-mono text-white">M{odomParams.leftMotorNumber}{odomParams.leftMotorDirInverted ? ' inv' : ''}</span></span>
+              <span className="text-white/50">R <span className="font-mono text-white">M{odomParams.rightMotorNumber}{odomParams.rightMotorDirInverted ? ' inv' : ''}</span></span>
             </div>
           </>
         ) : (
