@@ -25,6 +25,14 @@ LEFT_WHEEL_DIR_INVERTED = False
 RIGHT_WHEEL_MOTOR = Motor.DC_M2
 RIGHT_WHEEL_DIR_INVERTED = True
 
+#Venue and ingredient information
+tile = 24 #lengths of tiles in lab (inches)
+shelf_height = 0.1524 #m, need to verify actual height (6-8in)
+bun_height = .02 #m
+patty_height = .015#m
+#important heights
+target_heights = [shelf_height, shelf_height + bun_height,
+            shelf_height, shelf_height + bun_height, patty_height, shelf_height]
 
 def configure_robot(robot: Robot) -> None:
     robot.set_unit(POSITION_UNIT)
@@ -108,12 +116,16 @@ def run(robot: Robot) -> None:
             show_idle_leds(robot)
             robot._draw_lidar_obstacles()
             if robot.get_button(Button.BTN_1):
-                print("Start Moving!")
-                print("[FSM] MOVING")
-                state = "MOVING"
+                print("Start Scanning for Traffic Light!")
+                state == "TRAFFIC SCAN"
             if robot.get_button(Button.BTN_2):
                 print("BTN_2 pressed. Stopping robot and saving trajectory.")
                 robot.shutdown()
+
+        elif state == "TRAFFIC SCAN":
+            #scan for traffic light 
+            #if traffic light detected:
+                state = "MOVING"
 
         elif state == "MOVING":
             show_moving_leds(robot)
@@ -121,6 +133,26 @@ def run(robot: Robot) -> None:
             #     robot._draw_lidar_obstacles()
             #     print("Obstacle figure updated.")
             state = robot._nav_follow_pp_path_loop()
+
+        elif state == "Alignment State":
+            #adjust heading towards ingredient using camera
+            #drive forward
+            #if table reached (Lidar <3 in):
+                assem_stage = 0
+                state = "Assembly State"
+
+        elif state == "Assembly State":
+            ### MOVE LINEAR ACTUATOR TO CORRECT HEIGHT ###
+            target_height = target_heights[assem_stage]
+            #get current height?
+            #move stepper to target_height_current height
+            ## OPEN AND CLOSE GRIPPER ##
+            #if assem_stage == 4: #fully assembled
+                #state = "Delivery State"
+
+        elif state == "Delivery State":
+            #navigate to delivery area (resume )
+
 
         # FSM refresh rate control
         next_tick += period
