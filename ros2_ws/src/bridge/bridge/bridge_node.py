@@ -142,6 +142,20 @@ class BridgeNode(Node):
         topic = msg_dict["topic"]
         if topic == "sys_state":
             self._firmware_state_transitions.observe_system_state(msg_dict["data"])
+        if topic == "sensor_kinematics":
+            d = msg_dict["data"]
+            self._ws_broadcast({
+                "topic": "sensor_kinematics",
+                "data": {
+                    "x":       float(d["x"]),
+                    "y":       float(d["y"]),
+                    "theta":   float(d["theta"]),
+                    "vx":      float(d["vx"]),
+                    "vy":      float(d["vy"]),
+                    "vTheta":  float(d["vTheta"]),
+                },
+                "ts": time.time(),
+            })
         handler = self._handlers.get(topic)
         if handler is None:
             return
