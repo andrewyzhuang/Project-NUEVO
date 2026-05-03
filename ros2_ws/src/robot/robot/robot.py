@@ -235,6 +235,7 @@ class Robot(HardwareMixin, SensorsMixin, NavigationMixin, LegacyMixin):
         # ── Fused position ────────────────────────────────────────────────────
         self._fused_x_mm:    float = 0.0
         self._fused_y_mm:    float = 0.0
+        self._fused_pose_available: bool = False
         self._pos_fusion:    PositionComplementaryFilter = PositionComplementaryFilter(alpha=self.POSITION_ALPHA)
         self._vel:     tuple = (0.0, 0.0, 0.0)   # vx_mm_s, vy_mm_s, vtheta_rad_s
 

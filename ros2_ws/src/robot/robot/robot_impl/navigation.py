@@ -144,6 +144,8 @@ class NavigationMixin:
             self._fused_x_mm, self._fused_y_mm = self._pos_fusion.update(
                 msg.x, msg.y, gps_x, gps_y
             )
+            if gps_fresh:
+                self._fused_pose_available = True
             _raw_odom  = (float(msg.x), float(msg.y))
             _raw_fused = (self._fused_x_mm, self._fused_y_mm)
 
@@ -220,6 +222,8 @@ class NavigationMixin:
         with self._lock:
             self._odom_reset_pending = True
             self._odom_reset_event.clear()
+            self._fused_pose_available = False
+            self._gps_last_time = 0.0
             self._pos_fusion.reset()
         msg = SysOdomReset()
         msg.flags = 0
@@ -315,12 +319,35 @@ class NavigationMixin:
     # Pose / odometry
     # =========================================================================
 
+    def get_odometry_pose(self) -> tuple[float, float, float]:
+        """
+        Return raw odometry as (x, y, theta_deg) in the current unit and degrees.
+
+        This is always the direct `/sensor_kinematics` pose in the local
+        odometry-reset frame, without GPS position fusion.
+        """
+        x_mm, y_mm, theta_rad = self._get_odometry_pose_mm()
+        s = self._unit.value
+        return x_mm / s, y_mm / s, math.degrees(theta_rad)
+
+    def has_fused_pose(self) -> bool:
+        """
+        Return True once GPS has been incorporated into the position filter.
+
+        The fused pose can remain available even while `is_gps_active()` is
+        false, because the filter dead-reckons from the last fused anchor while
+        GPS is temporarily stale.
+        """
+        with self._lock:
+            return bool(self._fused_pose_available)
+
     def get_pose(self) -> tuple[float, float, float]:
         """
-        Return the current pose as (x, y, theta_deg) in user units and degrees.
+        Return the current navigation pose as (x, y, theta_deg).
 
-        x and y are GPS-fused when a recent GPS fix is available, otherwise
-        raw wheel-odometry position.  theta is sensor-fused heading.
+        Before GPS has been incorporated, this is raw odometry. After the first
+        accepted GPS fix has been incorporated, this becomes the GPS/odometry
+        fused position. `theta_deg` is always the current navigation heading.
         """
         x_mm, y_mm, theta_rad = self._get_pose_mm()
         s = self._unit.value
@@ -344,14 +371,18 @@ class NavigationMixin:
         """
         return self._odom_reset_event.wait(timeout=timeout)
 
-    def get_fused_pose(self) -> tuple[float, float, float]:
+    def get_fused_pose(self) -> tuple[float, float, float] | None:
         """
-        Return the fused (x, y, theta_deg) in user units and degrees.
-
-        Position is a complementary-filter blend of GPS and odometry.
-        Orientation is a complementary-filter blend of AHRS and odometry.
+        Return the fused navigation pose, or None if GPS has not been incorporated yet.
         """
-        return self.get_pose()
+        if not self.has_fused_pose():
+            return None
+        with self._lock:
+            x_mm = self._fused_x_mm
+            y_mm = self._fused_y_mm
+            theta_rad = self._fused_theta
+        s = self._unit.value
+        return x_mm / s, y_mm / s, math.degrees(theta_rad)
 
     # =========================================================================
     # Obstacles
@@ -875,9 +906,20 @@ class NavigationMixin:
     # =========================================================================
 
     def _get_pose_mm(self) -> tuple[float, float, float]:
-        """Return fused (x_mm, y_mm, theta_rad) without unit conversion."""
+        """Return the current navigation pose (raw odom or fused) without unit conversion."""
+        if not self.has_fused_pose():
+            return self._get_odometry_pose_mm()
         with self._lock:
             return (self._fused_x_mm, self._fused_y_mm, self._fused_theta)
+
+    def _get_odometry_pose_mm(self) -> tuple[float, float, float]:
+        """Return raw odometry (x_mm, y_mm, theta_rad) without unit conversion."""
+        with self._lock:
+            return (
+                float(self._pose[0]),
+                float(self._pose[1]),
+                float(self._pose[2]),
+            )
 
     def _get_obstacles_mm(self) -> list[tuple[float, float]]:
         """Return cached and provider-supplied APF obstacles in robot-frame millimeters."""

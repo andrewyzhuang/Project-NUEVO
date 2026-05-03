@@ -45,6 +45,16 @@ ENABLE_LIDAR = False
 ENABLE_GPS = False
 TAG_ID = 11
 
+LIDAR_MOUNT_X_MM = 0.0
+LIDAR_MOUNT_Y_MM = 0.0
+LIDAR_MOUNT_THETA_DEG = 0.0
+LIDAR_RANGE_MIN_MM = 150.0
+LIDAR_RANGE_MAX_MM = 6000.0
+LIDAR_FOV_DEG = (-180.0, 180.0)
+
+TAG_BODY_OFFSET_X_MM = 0.0
+TAG_BODY_OFFSET_Y_MM = 0.0
+
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -94,11 +104,22 @@ def configure_robot(robot: Robot) -> None:
 
     if ENABLE_LIDAR:
         robot.enable_lidar()
+        robot.set_lidar_mount(
+            x_mm=LIDAR_MOUNT_X_MM,
+            y_mm=LIDAR_MOUNT_Y_MM,
+            theta_deg=LIDAR_MOUNT_THETA_DEG,
+        )
+        robot.set_lidar_filter(
+            range_min_mm=LIDAR_RANGE_MIN_MM,
+            range_max_mm=LIDAR_RANGE_MAX_MM,
+            fov_deg=LIDAR_FOV_DEG,
+        )
         print("[sensor] lidar enabled — subscribing to /scan")
 
     if ENABLE_GPS:
         robot.enable_gps()
         robot.set_tracked_tag_id(TAG_ID)
+        robot.set_tag_body_offset(TAG_BODY_OFFSET_X_MM, TAG_BODY_OFFSET_Y_MM)
         print(f"[sensor] GPS enabled — tracking ArUco tag {TAG_ID}")
 
 
@@ -125,15 +146,16 @@ def show_moving_leds(robot: Robot) -> None:
 
 
 def print_status(robot: Robot) -> None:
-    x, y, theta = robot.get_pose()
-    if ENABLE_GPS and robot.is_gps_active():
+    ox, oy, otheta = robot.get_odometry_pose()
+    if ENABLE_GPS and robot.has_fused_pose():
         fx, fy, ftheta = robot.get_fused_pose()
         print(
-            f"  odom=({x:6.0f}, {y:6.0f}) mm  θ={theta:5.1f}°  |  "
-            f"fused=({fx:6.0f}, {fy:6.0f}) mm  θ={ftheta:5.1f}°"
+            f"  odom=({ox:6.0f}, {oy:6.0f}) mm  θ={otheta:5.1f}°  |  "
+            f"fused=({fx:6.0f}, {fy:6.0f}) mm  θ={ftheta:5.1f}°  "
+            f"(gps_fresh={robot.is_gps_active()})"
         )
     else:
-        print(f"  pose=({x:6.0f}, {y:6.0f}) mm  θ={theta:5.1f}°")
+        print(f"  odom=({ox:6.0f}, {oy:6.0f}) mm  θ={otheta:5.1f}°")
 
 
 def start_path(robot: Robot):
@@ -170,6 +192,17 @@ def run(robot: Robot) -> None:
                 f"[CFG] velocity={VELOCITY_MM_S:.0f} mm/s lookahead={LOOKAHEAD_MM:.0f} mm "
                 f"tolerance={TOLERANCE_MM:.0f} mm advance_radius={ADVANCE_RADIUS_MM:.0f} mm"
             )
+            if ENABLE_LIDAR:
+                print(
+                    f"[CFG] lidar mount=({LIDAR_MOUNT_X_MM:.0f}, {LIDAR_MOUNT_Y_MM:.0f}) mm "
+                    f"theta={LIDAR_MOUNT_THETA_DEG:.1f}° filter={LIDAR_RANGE_MIN_MM:.0f}-"
+                    f"{LIDAR_RANGE_MAX_MM:.0f} mm fov={LIDAR_FOV_DEG}"
+                )
+            if ENABLE_GPS:
+                print(
+                    f"[CFG] gps tag_id={TAG_ID} tag_body=({TAG_BODY_OFFSET_X_MM:.0f}, "
+                    f"{TAG_BODY_OFFSET_Y_MM:.0f}) mm"
+                )
             state = "IDLE"
 
         elif state == "IDLE":

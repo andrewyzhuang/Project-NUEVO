@@ -108,14 +108,15 @@ def cancel_motion(robot: Robot, handle) -> None:
 
 
 def print_status(robot: Robot) -> None:
-    if ENABLE_GPS and robot.is_gps_active():
+    if ENABLE_GPS and robot.has_fused_pose():
         x, y, theta = robot.get_fused_pose()
         label = "fused"
     else:
-        x, y, theta = robot.get_pose()
+        x, y, theta = robot.get_odometry_pose()
         label = "odom "
     obstacle_count = len(robot.get_obstacles())
-    print(f"  {label}=({x:6.0f}, {y:6.0f}) mm  θ={theta:5.1f}°  obstacles={obstacle_count}")
+    freshness = f" gps_fresh={robot.is_gps_active()}" if ENABLE_GPS and label == "fused" else ""
+    print(f"  {label}=({x:6.0f}, {y:6.0f}) mm  θ={theta:5.1f}°  obstacles={obstacle_count}{freshness}")
 
 
 def start_path(robot: Robot):

@@ -129,7 +129,7 @@ class SensorsMixin:
                 self._ahrs_heading = None
 
     def _on_tag_detections(self, msg: TagDetectionArray) -> None:
-        """Cache GPS position from the tracked ArUco tag (metres → mm, arena frame)."""
+        """Cache world-frame robot position from the tracked ArUco tag (metres → mm)."""
         for det in msg.detections:
             if self._tracked_tag_id == -1 or det.tag_id == self._tracked_tag_id:
                 with self._lock:
@@ -316,10 +316,11 @@ class SensorsMixin:
 
     def set_gps_offset(self, offset_x_mm: float, offset_y_mm: float) -> None:
         """
-        Set the fixed translation from GPS frame to arena frame (mm).
+        Set a fixed translation from the incoming GPS/tag frame to the world frame (mm).
 
-        arena_x = gps_x + offset_x
-        arena_y = gps_y + offset_y
+        The current global_gps stack already publishes world-frame coordinates,
+        so new code should normally leave this at `(0, 0)`. This hook remains
+        for backward compatibility with legacy demos and alternate GPS sources.
         """
         with self._lock:
             self._gps_offset_x_mm = float(offset_x_mm)
