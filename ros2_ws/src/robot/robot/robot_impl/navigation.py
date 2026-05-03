@@ -47,6 +47,10 @@ class MotionHandle:
     blocking=True waits before returning; the handle is already finished.
     blocking=False returns immediately; poll or wait as needed.
 
+    Completion contract:
+        once is_finished() returns True, the navigation slot has been released
+        and it is safe to start the next motion command immediately.
+
     Example:
         handle = robot.move_to(500, 0, 200, tolerance=15, blocking=False)
         # ... do other things ...
@@ -62,7 +66,7 @@ class MotionHandle:
         return self._finished.wait(timeout=timeout)
 
     def is_finished(self) -> bool:
-        """Non-blocking poll. Returns True if motion has finished."""
+        """Non-blocking poll. Returns True once the motion slot is released."""
         return self._finished.is_set()
 
     def is_done(self) -> bool:
@@ -679,16 +683,24 @@ class NavigationMixin:
 
     def is_moving(self) -> bool:
         """True if a navigation command is active."""
-        return self._nav_thread is not None and self._nav_thread.is_alive()
+        with self._nav_lock:
+            nav_thread = self._nav_thread
+        return nav_thread is not None and nav_thread.is_alive()
 
     def cancel_motion(self) -> None:
         """Abort any active navigation command. The robot stops."""
         self._nav_cancel.set()
-        if self._nav_thread is not None:
-            self._nav_thread.join(timeout=1.0)
-            if self._nav_thread.is_alive():
+        with self._nav_lock:
+            nav_thread = self._nav_thread
+
+        if nav_thread is not None:
+            nav_thread.join(timeout=1.0)
+            if nav_thread.is_alive():
                 return
-        self._nav_thread = None
+
+        with self._nav_lock:
+            if self._nav_thread is nav_thread:
+                self._nav_thread = None
         self._nav_cancel.clear()
 
     # =========================================================================
@@ -744,11 +756,11 @@ class NavigationMixin:
 
     def _start_nav(self, target_fn, blocking: bool, timeout: float) -> MotionHandle:
         """Start a new navigation thread. Only one base-motion command may run at a time."""
-        if self.is_moving():
-            raise RuntimeError("Another motion is still running")
-
-        self._nav_done.clear()
-        self._nav_cancel.clear()
+        with self._nav_lock:
+            if self._nav_thread is not None and self._nav_thread.is_alive():
+                raise RuntimeError("Another motion is still running")
+            self._nav_done.clear()
+            self._nav_cancel.clear()
 
         def runner() -> None:
             try:
@@ -760,10 +772,15 @@ class NavigationMixin:
                 except Exception:
                     pass
             finally:
+                with self._nav_lock:
+                    if self._nav_thread is threading.current_thread():
+                        self._nav_thread = None
                 self._nav_done.set()
 
-        self._nav_thread = threading.Thread(target=runner, daemon=True)
-        self._nav_thread.start()
+        nav_thread = threading.Thread(target=runner, daemon=True)
+        with self._nav_lock:
+            self._nav_thread = nav_thread
+        nav_thread.start()
         handle = MotionHandle(self._nav_done, self._nav_cancel)
         if blocking:
             handle.wait(timeout=timeout)

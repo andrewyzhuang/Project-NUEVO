@@ -504,6 +504,17 @@ class RobotApiTests(unittest.TestCase):
 
         self.assertIsInstance(handle, self.robot_module.MotionHandle)
         self.assertTrue(handle.is_finished())
+        self.assertFalse(self.robot.is_moving())
+
+    def test_finished_handle_releases_motion_slot_for_next_command(self) -> None:
+        handle = self.robot._start_nav(lambda: None, blocking=False, timeout=0.1)
+
+        self.assertTrue(handle.wait(timeout=0.1))
+        self.assertTrue(handle.is_finished())
+        self.assertFalse(self.robot.is_moving())
+
+        next_handle = self.robot._start_nav(lambda: None, blocking=False, timeout=0.1)
+        self.assertIsInstance(next_handle, self.robot_module.MotionHandle)
 
     def test_purepursuit_follow_path_requires_waypoints(self) -> None:
         with self.assertRaisesRegex(ValueError, "must not be empty"):

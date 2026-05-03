@@ -265,6 +265,7 @@ class Robot(HardwareMixin, SensorsMixin, NavigationMixin, LegacyMixin):
         self._limit_events:  dict[int, threading.Event] = {}
 
         # ── Navigation ────────────────────────────────────────────────────────
+        self._nav_lock:   threading.Lock   = threading.Lock()
         self._nav_thread: threading.Thread = None
         self._nav_cancel: threading.Event  = threading.Event()
         self._nav_done:   threading.Event  = threading.Event()
