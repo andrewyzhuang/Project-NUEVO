@@ -33,6 +33,7 @@ patty_height = .015#m
 #important heights
 target_heights = [shelf_height, shelf_height + bun_height,
             shelf_height, shelf_height + bun_height, patty_height, shelf_height]
+assem_stage = 0 #initialize counter for assembly state
 
 def configure_robot(robot: Robot) -> None:
     robot.set_unit(POSITION_UNIT)
@@ -138,7 +139,6 @@ def run(robot: Robot) -> None:
             #adjust heading towards ingredient using camera
             #drive forward
             #if table reached (Lidar <3 in):
-                assem_stage = 0
                 state = "Assembly State"
 
         elif state == "Assembly State":
@@ -146,15 +146,25 @@ def run(robot: Robot) -> None:
             target_height = target_heights[assem_stage]
             #get current height?
             #move stepper to target_height_current height
+
             ## OPEN AND CLOSE GRIPPER ##
-            #if assem_stage == 4: #fully assembled
+            #if assem_stage %2 == 1 #stage is odd
+                #command servo to open
+            #if assem_stage %2 == 0 #stage is even
+                #command servo to close
+            #assem_stage += 1 #update assembly stage counter
+            #if assem_stage > 4: #fully assembled
                 #state = "Delivery State"
 
+
         elif state == "Delivery State":
-            #navigate to delivery area (resume )
+            #navigate to delivery area (resume?)
+            #Turn 90 degrees and drive to drop off location
+            #move linear actuator to correct height and open gripper
+            
 
 
-        # FSM refresh rate control
+        #FSM refresh rate control
         next_tick += period
         sleep_s = next_tick - time.monotonic()
         if sleep_s > 0.0:
