@@ -38,12 +38,10 @@ from robot.util import densify_polyline  # noqa: F401 - optional helper for stud
 
 
 # ---------------------------------------------------------------------------
-# Sensor toggles
+# LiDAR related
 # ---------------------------------------------------------------------------
 
 ENABLE_LIDAR = False
-ENABLE_GPS = False
-TAG_ID = 11
 
 LIDAR_MOUNT_X_MM = 0.0
 LIDAR_MOUNT_Y_MM = 0.0
@@ -52,6 +50,15 @@ LIDAR_RANGE_MIN_MM = 150.0
 LIDAR_RANGE_MAX_MM = 6000.0
 LIDAR_FOV_DEG = (-180.0, 180.0)
 
+
+# ---------------------------------------------------------------------------
+# LiDAR related
+# ---------------------------------------------------------------------------
+
+ENABLE_GPS = False
+
+# ¡IMPORTANT! Update TAG_ID to match your tag
+TAG_ID = -1
 TAG_BODY_OFFSET_X_MM = 0.0
 TAG_BODY_OFFSET_Y_MM = 0.0
 
@@ -72,10 +79,8 @@ RIGHT_WHEEL_DIR_INVERTED = True
 
 PATH_CONTROL_POINTS = [
     (0.0, 0.0),
-    (0.0, 610.0),
-    (610.0, 610.0),
-    (610.0, 0.0),
-    (0.0, 0.0),
+    (0.0, 610*6),
+    (610.0, 610*6),
 ]
 
 # Optional: densify long segments for smoother tracking.
