@@ -26,14 +26,15 @@ RIGHT_WHEEL_MOTOR = Motor.DC_M2
 RIGHT_WHEEL_DIR_INVERTED = True
 
 #Venue and ingredient information
-tile = 24 #lengths of tiles in lab (inches)
-shelf_height = 0.1524 #m, need to verify actual height (6-8in)
-bun_height = .02 #m
-patty_height = .015#m
+tile = 25.4 #lengths of tiles in lab (mm)
+shelf_height = 152.4 #mm, need to verify actual height (6-8in)
+bun_height = 20 #mm
+patty_height = 15#mm
 #important heights
 target_heights = [shelf_height, shelf_height + bun_height,
             shelf_height, shelf_height + bun_height, patty_height, shelf_height]
 assem_stage = 0 #initialize counter for assembly state
+bottom_bun = 0 # used as a flag
 
 def configure_robot(robot: Robot) -> None:
     robot.set_unit(POSITION_UNIT)
@@ -118,49 +119,81 @@ def run(robot: Robot) -> None:
             robot._draw_lidar_obstacles()
             if robot.get_button(Button.BTN_1):
                 print("Start Scanning for Traffic Light!")
-                state == "TRAFFIC SCAN"
+                state = "TRAFFIC SCAN"
             if robot.get_button(Button.BTN_2):
                 print("BTN_2 pressed. Stopping robot and saving trajectory.")
                 robot.shutdown()
 
         elif state == "TRAFFIC SCAN":
-            #scan for traffic light 
+            #scan for green light 
             #if traffic light detected:
-                state = "MOVING"
+                print("Green light detected. Entering MOVE TO SHELVES state")
+                state = "MOVE TO SHELVES"
 
-        elif state == "MOVING":
+        elif state == "MOVE TO SHELVES":
             show_moving_leds(robot)
             # if next_tick % 0.5 < period: # print every half second
             #     robot._draw_lidar_obstacles()
             #     print("Obstacle figure updated.")
             state = robot._nav_follow_pp_path_loop()
+            #if distance traveled = 2 tiles (reached shelves):
+            print("Entering ingredient SEARCH state")
+            #   state == SEARCH
+        
+        elif state == "SEARCH":
+            #error check for collision
 
-        elif state == "Alignment State":
+            #scan for obstacles with lidar
+            #adjust heading
+            #drive foward 8 inches
+            #scan table with camera
+            #if bun detected:
+                #if assem_stage == 0 and bottom_bun == 0:
+                    #record bottom bun location, search for patty
+                    print('Saving Bottom Bun Location. Continuing Search')
+                    bottom_bun == 1
+                #else:
+                    print('Bun Identified. Entering Alignment State')
+                    state = "ALIGNMENT"
+                    
+            #elif patty detected:
+                #print('Patty identified. Entering ALIGNMENT state.')
+                #state == "ALIGNMENT"
+
+        elif state == "ALIGNMENT":
             #adjust heading towards ingredient using camera
             #drive forward
             #if table reached (Lidar <3 in):
-                state = "Assembly State"
+                #print("Aligned with ingredient, Entering ASSEMBLY")
+                #state = "ASSEMBLY"
 
-        elif state == "Assembly State":
+        #elif state == "ASSEMBLY":
             ### MOVE LINEAR ACTUATOR TO CORRECT HEIGHT ###
-            target_height = target_heights[assem_stage]
-            #get current height?
-            #move stepper to target_height_current height
+           # target_height = target_heights[assem_stage]
+            #get current height
+            #move stepper to target_height - current height
 
             ## OPEN AND CLOSE GRIPPER ##
-            #if assem_stage %2 == 1 #stage is odd
-                #command servo to open
-            #if assem_stage %2 == 0 #stage is even
-                #command servo to close
+            if assem_stage % 2 == 0: #closing gripper(stages 0, 2, 4)
+                #close gripper
+            #else: #opening gripper (stages 1, 3)
+                #open gripper
+            #error check (nothing picked up)
+
             #assem_stage += 1 #update assembly stage counter
-            #if assem_stage > 4: #fully assembled
-                #state = "Delivery State"
+            
+            #if assem_stage > 4: #fully assembled, move on to next state
+                state = "DELIVERY"
+            else:
+                 state = "SEARCH"
 
 
-        elif state == "Delivery State":
-            #navigate to delivery area (resume?)
+        elif state == "DELIVERY":
+            #navigate to delivery area (avoiding obstacles)
             #Turn 90 degrees and drive to drop off location
             #move linear actuator to correct height and open gripper
+
+            #error check
             
 
 
