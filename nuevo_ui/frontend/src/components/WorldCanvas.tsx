@@ -8,20 +8,21 @@ import { useRef, useEffect, useState, useCallback } from 'react'
 import { useRobotStore, LIDAR_WINDOW_FRAMES } from '../store/robotStore'
 
 // Venue: 5×6 grid, 610 mm cells.
-// Origin (0,0) = centre of bottom border of the bottom-left cell.
-// → venue spans x: -305..2745, y: 0..3660
+// Origin (0,0) sits half a grid below the venue bottom border.
+// → venue spans x: -305..2745, y: 305..3965
 const GRID_MM        = 610
 const VENUE_COLS     = 5
 const VENUE_ROWS     = 6
 const VENUE_LEFT_MM  = -GRID_MM / 2                          // -305
 const VENUE_RIGHT_MM =  VENUE_LEFT_MM + VENUE_COLS * GRID_MM // 2745
-const VENUE_TOP_MM   =  VENUE_ROWS * GRID_MM                 // 3660
+const VENUE_BOTTOM_MM = GRID_MM / 2                          // 305
+const VENUE_TOP_MM   =  VENUE_BOTTOM_MM + VENUE_ROWS * GRID_MM // 3965
 const VENUE_PAD_MM   =  GRID_MM / 2                          // 305
 
 const VENUE_EXT = {
   minX: VENUE_LEFT_MM  - VENUE_PAD_MM,
   maxX: VENUE_RIGHT_MM + VENUE_PAD_MM,
-  minY:                - VENUE_PAD_MM,
+  minY: VENUE_BOTTOM_MM - GRID_MM,
   maxY: VENUE_TOP_MM   + VENUE_PAD_MM,
 }
 const MAP_WIDTH_MM = VENUE_EXT.maxX - VENUE_EXT.minX
@@ -116,7 +117,7 @@ export function WorldCanvas() {
 
     // Venue boundary rectangle
     {
-      const [vx0, vy0] = toC(VENUE_LEFT_MM, 0)
+      const [vx0, vy0] = toC(VENUE_LEFT_MM, VENUE_BOTTOM_MM)
       const [vx1, vy1] = toC(VENUE_RIGHT_MM, VENUE_TOP_MM)
       ctx.strokeStyle = 'rgba(255,255,255,0.18)'
       ctx.lineWidth   = 1
@@ -127,11 +128,11 @@ export function WorldCanvas() {
     ctx.strokeStyle = 'rgba(255,255,255,0.08)'
     ctx.lineWidth   = 0.5
     for (let col = 0; col <= VENUE_COLS; col++) {
-      const [cx] = toC(VENUE_LEFT_MM + col * GRID_MM, 0)
+      const [cx] = toC(VENUE_LEFT_MM + col * GRID_MM, VENUE_BOTTOM_MM)
       ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke()
     }
     for (let row = 0; row <= VENUE_ROWS; row++) {
-      const [, cy] = toC(0, row * GRID_MM)
+      const [, cy] = toC(0, VENUE_BOTTOM_MM + row * GRID_MM)
       ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(W, cy); ctx.stroke()
     }
 
