@@ -46,8 +46,8 @@ Your job is to read a UML statechart design and produce a complete main.py file.
 
 Read these files in order before generating:
 
-1. <path>/examples/ai_codegen/ai_agent_codegen.md  — generation rules
-2. <path>/robot/README.md                          — setup flow and API overview
+1. <path>/robot/ai_codegen/ai_agent_codegen.md     — generation rules
+2. <path>/README.md                                — setup flow and API overview
 3. <path>/robot/API_REFERENCE.md                   — full method signatures
 4. <path>/robot/hardware_map.py                    — enums and constants
 5. <your design file(s)>                           — the statechart to implement
@@ -71,7 +71,7 @@ Before running, verify:
 - States in code match states in the diagram
 - Entry actions are in the *previous* state's branch (not inside the state they belong to)
 - Transition actions appear before `state = "..."`, after any cleanup
-- INIT includes the ESTOP/ERROR check
+- INIT includes the ESTOP/ERROR check and the odometry reset confirmation pattern
 - Tick-rate control block is present and unmodified
 
 Copy to `main.py` if the agent wrote to a different file, then:
@@ -107,19 +107,19 @@ prefixed state names and repeat the shared guard in each substate:
 Superstate ARMED
 ├── substate IDLE     → code state "ARMED_IDLE"
 ├── substate MOVING   → code state "ARMED_MOVING"
-└── shared transition: estop_pressed / → SAFE
+└── shared transition: cancel_requested / → SAFE
 ```
 
 ```python
 elif state == "ARMED_IDLE":
-    if robot.get_button(Button.BTN_ESTOP):   # shared superstate transition
+    if robot.get_button(Button.BTN_2):       # shared superstate transition
         robot.stop()
         state = "SAFE"
     elif robot.was_button_pressed(Button.BTN_1):
         state = "ARMED_MOVING"
 
 elif state == "ARMED_MOVING":
-    if robot.get_button(Button.BTN_ESTOP):   # shared superstate transition
+    if robot.get_button(Button.BTN_2):       # shared superstate transition
         robot.stop()
         state = "SAFE"
     elif drive_handle.is_finished():
@@ -127,7 +127,7 @@ elif state == "ARMED_MOVING":
 ```
 
 If the shared transition logic is non-trivial, tell the agent to factor it into
-a helper function (e.g., `check_estop(robot, state)`) and call it at the top
+a helper function (e.g., `check_cancel(robot, state)`) and call it at the top
 of each substate branch.
 
 ---
@@ -159,6 +159,6 @@ clear section headings.
 ## Updating the instructions
 
 If the Robot API changes, update `ai_agent_codegen.md` (API quick reference
-section) and `../README.md` / `../API_REFERENCE.md` as described in the
+section) and `../../README.md` / `../API_REFERENCE.md` as described in the
 maintenance checklist in `API_REFERENCE.md`. The prompt itself does not need
 to change.

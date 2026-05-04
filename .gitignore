@@ -217,7 +217,6 @@ ros2_ws/src/lab_docs/
 test_data/
 logs/
 *.log
-*.png
 
 # TLV Type Generated Definitions
 # TLV_TypeDefs.h

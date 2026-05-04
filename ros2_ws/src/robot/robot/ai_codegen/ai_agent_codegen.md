@@ -24,7 +24,7 @@ ros2_ws/src/robot/robot/
 ```
 
 Before generating, read:
-- [`../README.md`](../README.md) — required setup flow and API overview
+- [`../../README.md`](../../README.md) — required setup flow and API overview
 - [`../API_REFERENCE.md`](../API_REFERENCE.md) — full method signatures and constraints
 - This file — statechart translation rules
 
@@ -199,9 +199,11 @@ if state == "INIT":
     #    are relative to this reset point.
     robot.reset_odometry()
 
-    # 4. Block until the first kinematics tick arrives so get_pose()
-    #    returns the fresh (0, 0, θ) instead of stale data.
-    robot.wait_for_pose_update(timeout=0.5)
+    # 4. Wait for the firmware to confirm the reset so the first pose
+    #    already reflects the fresh (0, 0, θ).
+    if not robot.wait_for_odometry_reset(timeout=2.0):
+        print("[warn] odometry reset not confirmed within 2.0s; continuing with latest pose")
+        robot.wait_for_pose_update(timeout=0.5)
 
     state = "IDLE"
 ```
@@ -229,14 +231,14 @@ convention:
 ```
 Superstate: ARMED
   Substates: IDLE, MOVING
-  Shared transition: estop_pressed / → SAFE
+  Shared transition: cancel_requested / → SAFE
 ```
 
 Becomes:
 
 ```python
 elif state == "ARMED_IDLE":
-    if robot.get_button(Button.BTN_ESTOP):  # shared superstate transition
+    if robot.get_button(Button.BTN_2):      # shared superstate transition
         robot.stop()
         state = "SAFE"
     elif robot.was_button_pressed(Button.BTN_1):
@@ -244,7 +246,7 @@ elif state == "ARMED_IDLE":
         state = "ARMED_MOVING"
 
 elif state == "ARMED_MOVING":
-    if robot.get_button(Button.BTN_ESTOP):  # shared superstate transition
+    if robot.get_button(Button.BTN_2):      # shared superstate transition
         robot.stop()
         state = "SAFE"
     elif handle and handle.is_finished():
@@ -257,7 +259,7 @@ into a helper and call it at the top of each substate branch:
 ```python
 def _check_shared_armed(robot, handle) -> str | None:
     """Returns the next state if a shared ARMED transition fires, else None."""
-    if robot.get_button(Button.BTN_ESTOP):
+    if robot.get_button(Button.BTN_2):
         if handle:
             handle.cancel()
             handle.wait(timeout=1.0)
@@ -292,15 +294,21 @@ the generated FSM:
 from __future__ import annotations
 import time
 
-from robot.hardware_map import Button, DEFAULT_FSM_HZ, LED, Motor
-from robot.robot import FirmwareState, Robot, Unit
+from robot.hardware_map import (
+    Button,
+    DEFAULT_FSM_HZ,
+    INITIAL_THETA_DEG,
+    LED,
+    LEFT_WHEEL_DIR_INVERTED,
+    LEFT_WHEEL_MOTOR,
+    POSITION_UNIT,
+    RIGHT_WHEEL_DIR_INVERTED,
+    RIGHT_WHEEL_MOTOR,
+    WHEEL_BASE,
+    WHEEL_DIAMETER,
+)
+from robot.robot import FirmwareState, Robot
 # add further imports as needed (Stepper, ServoChannel, DCMotorMode, ...)
-
-
-POSITION_UNIT   = Unit.MM
-WHEEL_DIAMETER  = 74.0   # mm — update if different
-WHEEL_BASE      = 333.0  # mm — update if different
-INITIAL_THETA   = 90.0   # degrees
 
 
 def configure_robot(robot: Robot) -> None:
@@ -308,11 +316,11 @@ def configure_robot(robot: Robot) -> None:
     robot.set_odometry_parameters(
         wheel_diameter=WHEEL_DIAMETER,
         wheel_base=WHEEL_BASE,
-        initial_theta_deg=INITIAL_THETA,
-        left_motor_id=Motor.DC_M1,
-        left_motor_dir_inverted=False,
-        right_motor_id=Motor.DC_M2,
-        right_motor_dir_inverted=True,
+        initial_theta_deg=INITIAL_THETA_DEG,
+        left_motor_id=LEFT_WHEEL_MOTOR,
+        left_motor_dir_inverted=LEFT_WHEEL_DIR_INVERTED,
+        right_motor_id=RIGHT_WHEEL_MOTOR,
+        right_motor_dir_inverted=RIGHT_WHEEL_DIR_INVERTED,
     )
 
 
@@ -334,7 +342,9 @@ def run(robot: Robot) -> None:
                 robot.reset_estop()
             robot.set_state(FirmwareState.RUNNING)
             robot.reset_odometry()               # omit if no odometry needed
-            robot.wait_for_pose_update(timeout=0.5)  # omit if no odometry needed
+            if not robot.wait_for_odometry_reset(timeout=2.0):  # omit if no odometry needed
+                print("[warn] odometry reset not confirmed within 2.0s; continuing with latest pose")
+                robot.wait_for_pose_update(timeout=0.5)
             state = "IDLE"
 
         # ── Tick-rate control (do not modify) ─────────────────────────────
@@ -381,7 +391,9 @@ robot.set_led(LED.GREEN, 200, mode=LEDMode.BLINK, period_ms=500)
 ```python
 x, y, theta_deg = robot.get_pose()
 robot.reset_odometry()
-robot.wait_for_pose_update(timeout=0.5)
+if not robot.wait_for_odometry_reset(timeout=2.0):
+    print("[warn] odometry reset not confirmed within 2.0s; continuing with latest pose")
+    robot.wait_for_pose_update(timeout=0.5)
 ```
 
 ### Stop and cancel
@@ -423,7 +435,9 @@ def run(robot: Robot) -> None:
                 robot.reset_estop()
             robot.set_state(FirmwareState.RUNNING)
             robot.reset_odometry()
-            robot.wait_for_pose_update(timeout=0.5)
+            if not robot.wait_for_odometry_reset(timeout=2.0):
+                print("[warn] odometry reset not confirmed within 2.0s; continuing with latest pose")
+                robot.wait_for_pose_update(timeout=0.5)
             state = "IDLE"
 
         elif state == "IDLE":
