@@ -141,20 +141,27 @@ def run(robot: Robot) -> None:
             #   state == SEARCH
         
         elif state == "SEARCH":
-            #error check for collision
-
-            #scan for obstacles with lidar
-            #adjust heading
-            #drive foward 8 inches
+            robot.turn_by(
+                delta_deg=90,
+                blocking=True,
+                tolerance_deg=3,
+            )
+            #drive foward to shelf (8 in):
+            robot.move_forward(
+                distance=203.2,
+                velocity=100,
+                tolerance=20,
+                blocking=True)
             #scan table with camera
+
             #if bun detected:
                 #if assem_stage == 0 and bottom_bun == 0:
                     #record bottom bun location, search for patty
-                    print('Saving Bottom Bun Location. Continuing Search')
-                    bottom_bun == 1
+                    #print('Saving Bottom Bun Location. Continuing Search')
+                    #bottom_bun == 1
                 #else:
-                    print('Bun Identified. Entering Alignment State')
-                    state = "ALIGNMENT"
+                    #print('Bun Identified. Entering Alignment State')
+                    #state = "ALIGNMENT"
                     
             #elif patty detected:
                 #print('Patty identified. Entering ALIGNMENT state.')
