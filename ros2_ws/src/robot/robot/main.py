@@ -35,7 +35,7 @@ target_heights = [shelf_height, shelf_height + bun_height,
             shelf_height, shelf_height + bun_height, patty_height, shelf_height]
 assem_stage = 0 #initialize counter for assembly state
 bottom_bun = 0 # used as a flag
-
+initial_search = 0 #to check if initial search already happened
 def configure_robot(robot: Robot) -> None:
     robot.set_unit(POSITION_UNIT)
     robot.set_odometry_parameters(
@@ -141,17 +141,24 @@ def run(robot: Robot) -> None:
             #   state == SEARCH
         
         elif state == "SEARCH":
-            robot.turn_by(
-                delta_deg=90,
-                blocking=True,
-                tolerance_deg=3,
-            )
-            #drive foward to shelf (8 in):
-            robot.move_forward(
-                distance=203.2,
-                velocity=100,
-                tolerance=20,
-                blocking=True)
+            if initial_search == 0:
+                #turn toward shelves
+                robot.turn_by(
+                    delta_deg=-90,
+                    blocking=True,
+                    tolerance_deg=3)
+            else:
+                #turn away from shelves
+                robot.turn_by(
+                    delta_deg = 90,
+                    blocking=True,
+                    tolerance_deg=3)
+                #drive foward to shelf (8 in):
+                robot.move_forward(
+                    distance=203.2,
+                    velocity=100,
+                    tolerance=20,
+                    blocking=True)
             #scan table with camera
 
             #if bun detected:
