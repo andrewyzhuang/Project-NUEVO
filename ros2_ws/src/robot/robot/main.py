@@ -7,6 +7,8 @@ from robot.util import densify_polyline
 from robot.path_planner import PurePursuitPlanner
 import math
 import numpy as np
+from ros2_ws.src.robot.robot import robot
+from ros2_ws.src.robot.robot.examples.move_servos import SEQUENCE_SERVO_2
 
 
 # ---------------------------------------------------------------------------
@@ -25,10 +27,13 @@ LEFT_WHEEL_DIR_INVERTED = False
 RIGHT_WHEEL_MOTOR = Motor.DC_M2
 RIGHT_WHEEL_DIR_INVERTED = True
 
+GRIPPER_SERVO_1 = 1 #Channel 1 for gripper servo
+robot.enable_servo(GRIPPER_SERVO_1)
+
 #Venue and ingredient information
-tile = 25.4 #lengths of tiles in lab (mm)
-shelf_height = 152.4 #mm, need to verify actual height (6-8in)
-bun_height = 20 #mm
+tile = 609.6#lengths of tiles in lab (mm)
+shelf_height = 152.4#mm, need to verify actual height (6-8in)
+bun_height = 20#mm
 patty_height = 15#mm
 #important heights
 target_heights = [shelf_height, shelf_height + bun_height,
@@ -159,8 +164,8 @@ def run(robot: Robot) -> None:
                     velocity=100,
                     tolerance=20,
                     blocking=True)
-            #scan table with camera
-
+            #scan table with camera:
+                #scan while turning toward table (slowly)
             #if bun detected:
                 #if assem_stage == 0 and bottom_bun == 0:
                     #record bottom bun location, search for patty
@@ -189,9 +194,9 @@ def run(robot: Robot) -> None:
 
             ## OPEN AND CLOSE GRIPPER ##
             if assem_stage % 2 == 0: #closing gripper(stages 0, 2, 4)
-                #close gripper
+                #robot.set_servo(GRIPPER_SERVO_1, 90)#close gripper
             #else: #opening gripper (stages 1, 3)
-                #open gripper
+                #robot.set_servo(GRIPPER_SERVO_1, -90)#open gripper
             #error check (nothing picked up)
 
             #assem_stage += 1 #update assembly stage counter
