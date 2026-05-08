@@ -7,7 +7,7 @@ HOW TO RUN
 ----------
 Copy this file over main.py, then restart the robot node:
 
-    cp examples/lapf_to_goal.py main.py
+    cp ros2_ws/src/robot/robot/examples/obstacle_avoidance_apf.py ros2_ws/src/robot/robot/main.py
     ros2 run robot robot
 
 Press BTN_1 to start the run. BTN_2 cancels the active motion.
