@@ -70,7 +70,7 @@ ADVANCE_RADIUS_MM = 150.0
 MAX_ANGULAR_RAD_S = 1.0
 
 # Edit these directly while tuning LAPF behavior.
-LEASH_LENGTH_MM = 400.0 # This is for a front wheel drive; make it ~50 mm for a rear wheel drive
+LEASH_LENGTH_MM = 50.0 # This is for a rear wheel drive; make it ~400 mm for front wheel drive
 REPULSION_RANGE_MM = 300.0
 TARGET_SPEED_MM_S = 200.0
 REPULSION_GAIN = 550.0
