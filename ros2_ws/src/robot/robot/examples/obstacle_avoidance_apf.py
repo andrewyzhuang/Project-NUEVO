@@ -58,9 +58,15 @@ ENABLE_GPS = False
 # IMPORTANT: update TAG_ID to match your robot when GPS is enabled.
 TAG_ID = -1
 
-GOAL_MM = (610.0, 610.0*5)
+WAYPOINTS_MM = [
+    (610.0, 610.0),
+    (610.0, 1220.0),
+    (0.0, 1220.0),
+    (0.0, 0.0)
+]
 VELOCITY_MM_S = 150.0
 TOLERANCE_MM = 50.0
+ADVANCE_RADIUS_MM = 150.0
 MAX_ANGULAR_RAD_S = 1.0
 
 # Edit these directly while tuning LAPF behavior.
@@ -188,13 +194,13 @@ def print_status(robot: Robot) -> None:
     )
 
 
-def start_goal(robot: Robot):
+def start_path(robot: Robot):
     cfg = resolve_lapf_config()
-    return robot.lapf_to_goal(
-        GOAL_MM[0],
-        GOAL_MM[1],
+    return robot.lapf_follow_path(
+        WAYPOINTS_MM,
         velocity=VELOCITY_MM_S,
         tolerance=TOLERANCE_MM,
+        advance_radius=ADVANCE_RADIUS_MM,
         leash_length_mm=cfg["leash_length_mm"],
         repulsion_range_mm=cfg["repulsion_range_mm"],
         target_speed_mm_s=cfg["target_speed_mm_s"],
@@ -226,8 +232,8 @@ def run(robot: Robot) -> None:
             reset_mission_pose(robot)
             show_idle_leds(robot)
             lapf_cfg = resolve_lapf_config()
-            print("[FSM] IDLE — press BTN_1 to start LAPF goal, BTN_2 to cancel")
-            print(f"[CFG] goal={GOAL_MM} velocity={VELOCITY_MM_S:.0f} mm/s tolerance={TOLERANCE_MM:.0f} mm")
+            print("[FSM] IDLE — press BTN_1 to start LAPF path, BTN_2 to cancel")
+            print(f"[CFG] {len(WAYPOINTS_MM)} waypoints velocity={VELOCITY_MM_S:.0f} mm/s tolerance={TOLERANCE_MM:.0f} mm")
             print(
                 f"[CFG] LAPF: leash={lapf_cfg['leash_length_mm']:.0f} mm "
                 f"half_angle={lapf_cfg['leash_half_angle_deg']:.0f}° "
@@ -260,9 +266,9 @@ def run(robot: Robot) -> None:
             if robot.was_button_pressed(Button.BTN_1):
                 reset_mission_pose(robot)
                 show_running_leds(robot)
-                motion_handle = start_goal(robot)
+                motion_handle = start_path(robot)
                 last_status_print_at = now
-                print("[FSM] MOVING — LAPF goal started")
+                print(f"[FSM] MOVING — LAPF path with {len(WAYPOINTS_MM)} waypoints started")
                 state = "MOVING"
 
         elif state == "MOVING":
@@ -270,14 +276,14 @@ def run(robot: Robot) -> None:
                 cancel_motion(robot, motion_handle)
                 motion_handle = None
                 show_idle_leds(robot)
-                print("[FSM] IDLE — LAPF goal cancelled")
+                print("[FSM] IDLE — LAPF motion cancelled")
                 state = "IDLE"
             else:
                 if now - last_status_print_at >= STATUS_PRINT_INTERVAL_S:
                     print_status(robot)
                     last_status_print_at = now
                 if motion_handle is not None and motion_handle.is_finished():
-                    print("[FSM] DONE — goal complete")
+                    print("[FSM] DONE — path complete")
                     print_status(robot)
                     motion_handle = None
                     robot.stop()
