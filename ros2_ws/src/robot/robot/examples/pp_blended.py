@@ -194,6 +194,26 @@ def run(robot: Robot) -> None:
                 f"[CFG] velocity={VELOCITY_MM_S:.0f} mm/s  lookahead={LOOKAHEAD_MM:.0f} mm  "
                 f"tolerance={TOLERANCE_MM:.0f} mm  repulsion_range={REPULSION_RANGE_MM:.0f} mm"
             )
+            if ENABLE_LIDAR:
+                print(
+                    f"[CFG] lidar mount=({LIDAR_MOUNT_X_MM:.0f}, {LIDAR_MOUNT_Y_MM:.0f}) mm "
+                    f"theta={LIDAR_MOUNT_THETA_DEG:.1f}° filter={LIDAR_RANGE_MIN_MM:.0f}-"
+                    f"{LIDAR_RANGE_MAX_MM:.0f} mm fov={LIDAR_FOV_DEG}"
+                )
+            if ENABLE_GPS:
+                print(
+                    f"[CFG] gps tag_id={TAG_ID}  "
+                    f"tag_body=({TAG_BODY_OFFSET_X_MM:.0f}, {TAG_BODY_OFFSET_Y_MM:.0f}) mm  "
+                    f"position_alpha={GPS_POSITION_ALPHA:.2f}"
+                )
+                if ENABLE_GPS_TANGENT_HEADING:
+                    print(
+                        f"[CFG] heading=gps_tangent  "
+                        f"alpha={GPS_TANGENT_ALPHA:.2f}  "
+                        f"min_displacement={GPS_TANGENT_MIN_DISPLACEMENT_MM:.0f} mm"
+                    )
+                else:
+                    print("[CFG] heading=imu")
             state = "IDLE"
 
         elif state == "IDLE":
