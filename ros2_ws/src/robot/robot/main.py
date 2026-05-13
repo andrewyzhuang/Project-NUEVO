@@ -2,21 +2,17 @@ from __future__ import annotations
 import time
 
 from robot.robot import FirmwareState, Robot, Unit
-from robot.hardware_map import Button, DEFAULT_FSM_HZ, LED, Motor
-from robot.util import densify_polyline
-from robot.path_planner import PurePursuitPlanner
+from robot.hardware_map import Button, DEFAULT_FSM_HZ, LED, Motor, ServoChannel
+from robot.util import densify_polyline, run_task
 import math
 import numpy as np
-from ros2_ws.src.robot.robot import robot
-from ros2_ws.src.robot.robot.examples.move_servos import SEQUENCE_SERVO_2
 
 
 # ---------------------------------------------------------------------------
 # Robot build configuration
 # ---------------------------------------------------------------------------
 
-TAG_ID = 21 # set aruco tag ID 
-TAG_ID = 21 # set aruco tag ID 
+TAG_ID = 21 # set aruco tag ID
 POSITION_UNIT = Unit.MM
 WHEEL_DIAMETER = 74.0
 WHEEL_BASE = 333.0
@@ -27,8 +23,11 @@ LEFT_WHEEL_DIR_INVERTED = False
 RIGHT_WHEEL_MOTOR = Motor.DC_M2
 RIGHT_WHEEL_DIR_INVERTED = True
 
-GRIPPER_SERVO_1 = 1 #Channel 1 for gripper servo
-robot.enable_servo(GRIPPER_SERVO_1)
+# Servo — gripper jaw
+GRIPPER_CHANNEL   = ServoChannel.CH_1
+GRIPPER_OPEN_DEG  = 20.0   # degrees — jaw fully open
+GRIPPER_CLOSE_DEG = 90.0   # degrees — jaw gripping
+
 
 #Venue and ingredient information
 tile = 609.6#lengths of tiles in lab (mm)
@@ -181,7 +180,19 @@ def run(robot: Robot) -> None:
 
         elif state == "ALIGNMENT":
             #adjust heading towards ingredient using camera
+            target_angle_from_camera = 0.0 # Placeholder for camera detection logic
+            robot.turn_by(
+                delta_deg=target_angle_from_camera,
+                blocking=True,
+                tolerance_deg=2.0
+            )
             #drive forward
+            robot.move_forward(
+                distance=100.0,
+                velocity=80.0,
+                tolerance=10.0,
+                blocking=True
+            )
             #if table reached (Lidar <3 in):
                 #print("Aligned with ingredient, Entering ASSEMBLY")
                 #state = "ASSEMBLY"
