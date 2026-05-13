@@ -416,6 +416,20 @@ Additional parameters:
 - `repulsion_gain` — repulsion force scale (default 500.0; increase to push
   harder away from obstacles)
 
+#### `vector_blended_follow_path(waypoints, velocity, lookahead, tolerance, repulsion_range, blocking=True, max_angular_rad_s=2.0, repulsion_gain=500.0, timeout=None, *, advance_radius=None) → MotionHandle`
+Follow an ordered waypoint path using vector-blended Pure Pursuit and APF.
+
+This algorithm combines a pure-pursuit steering vector toward a lookahead
+point with a repulsive vector from any detected obstacles (cones) to
+determine the final steering angle. The magnitude of the repulsive vector
+scales inversely with distance.
+
+Parameters:
+- `lookahead` — pure-pursuit lookahead distance in current unit
+- `repulsion_range` — obstacle detection range in current unit
+- `repulsion_gain` — repulsion force scale (default 500.0; increase to push
+  harder away from obstacles)
+
 #### `lapf_to_goal(x, y, velocity, tolerance, leash_length_mm=None, repulsion_range_mm=None, target_speed_mm_s=None, blocking=True, max_angular_rad_s=1.0, repulsion_gain=None, attraction_gain=None, force_ema_alpha=None, inflation_margin_mm=None, leash_half_angle_deg=None, timeout=None) → MotionHandle`
 Navigate to one goal using a leashed APF virtual target.
 

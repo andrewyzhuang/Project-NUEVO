@@ -765,3 +765,121 @@ class PurePursuitPlannerWithAvoidance(PathPlanner):
 
 def _wrap_angle(a: float) -> float:
     return (a + math.pi) % (2.0 * math.pi) - math.pi
+
+
+# =============================================================================
+# Vector Blended Pure Pursuit
+# =============================================================================
+
+class VectorBlendedPlanner(PathPlanner):
+    """
+    Vector-blended Pure Pursuit and Artificial Potential Fields planner.
+
+    This algorithm uses basic pure pursuit to calculate a steering vector
+    toward a lookahead point. It then adds a repulsive vector from any
+    detected obstacles (cones) to determine the final steering direction.
+    """
+
+    def __init__(
+        self,
+        lookahead_dist: float = 150.0,
+        max_angular: float = 2.0,
+        repulsion_gain: float = 500.0,
+        repulsion_range: float = 400.0,
+        goal_tolerance: float = 20.0,
+    ) -> None:
+        self.Ld = lookahead_dist
+        self.w_max = max_angular
+        self.rep_gain = repulsion_gain
+        self.rep_range = repulsion_range
+        self.goal_tolerance = goal_tolerance
+
+    def compute_velocity(
+        self,
+        pose: tuple[float, float, float],
+        waypoints: list[tuple[float, float]],
+        obstacles_r: np.ndarray,
+        max_linear: float,
+    ) -> tuple[float, float]:
+        """
+        Return (linear_mm_s, angular_rad_s) blending pure pursuit and APF.
+
+        pose        - (x, y, theta_rad) world frame
+        waypoints   - ordered list of (x, y) world frame
+        obstacles_r - (N, 2) array of obstacles in robot frame
+        max_linear  - maximum forward speed
+        """
+        px, py, theta = pose
+
+        # 1. Target Reached check
+        if not waypoints:
+            return 0.0, 0.0
+        dist_to_goal = math.hypot(waypoints[-1][0] - px, waypoints[-1][1] - py)
+        if dist_to_goal < self.goal_tolerance:
+            return 0.0, 0.0
+
+        # 2. Pure Pursuit (Attractive) Vector in Robot Frame
+        tx, ty = self._lookahead_point(px, py, waypoints)
+        dx = tx - px
+        dy = ty - py
+
+        # Transform lookahead point to robot frame
+        cos_th = math.cos(theta)
+        sin_th = math.sin(theta)
+        lx_r = cos_th * dx + sin_th * dy
+        ly_r = -sin_th * dx + cos_th * dy
+
+        l_dist = math.hypot(lx_r, ly_r)
+        # Attraction vector unit vector in robot frame
+        attr_vx = lx_r / l_dist if l_dist > 1e-6 else 0.0
+        attr_vy = ly_r / l_dist if l_dist > 1e-6 else 0.0
+
+        # 3. Repulsive Vector in Robot Frame
+        rep_vx = 0.0
+        rep_vy = 0.0
+
+        if obstacles_r is not None and obstacles_r.size > 0:
+            # obstacles_r is (N, 2) in robot frame
+            ox = obstacles_r[:, 0]
+            oy = obstacles_r[:, 1]
+            dists = np.sqrt(ox*ox + oy*oy)
+
+            # Filter by range
+            in_range = (dists < self.rep_range) & (dists > 10.0)
+            if np.any(in_range):
+                d = dists[in_range]
+                # Magnitude scales inversely with distance
+                mag = self.rep_gain / d
+
+                # Direction away from cone: robot(0,0) - cone(ox,oy) = (-ox, -oy)
+                ux = -ox[in_range] / d
+                uy = -oy[in_range] / d
+
+                rep_vx = float(np.sum(mag * ux))
+                rep_vy = float(np.sum(mag * uy))
+
+        # 4. Blending
+        total_vx = attr_vx + rep_vx
+        total_vy = attr_vy + rep_vy
+
+        # 5. Steering
+        # Angle of the combined vector in robot frame
+        steering_angle = math.atan2(total_vy, total_vx)
+
+        # Proportional control for angular velocity
+        # Simple gain of 2.0 to map angle to rad/s
+        angular = 2.0 * steering_angle
+        angular = np.clip(angular, -self.w_max, self.w_max)
+
+        # Linear velocity: slow down if we are turning hard
+        linear = max_linear * max(0.0, math.cos(steering_angle))
+
+        return float(linear), float(angular)
+
+    def _lookahead_point(
+        self, px: float, py: float, waypoints: list[tuple[float, float]]
+    ) -> tuple[float, float]:
+        for wx, wy in waypoints:
+            if math.hypot(wx - px, wy - py) >= self.Ld:
+                return wx, wy
+        return waypoints[-1]

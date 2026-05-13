@@ -852,6 +852,58 @@ class NavigationMixin:
 
         return self._start_nav(target, blocking, timeout)
 
+    def vector_blended_follow_path(
+        self,
+        waypoints: list[tuple[float, float]],
+        velocity: float,
+        lookahead: float,
+        tolerance: float,
+        repulsion_range: float,
+        blocking: bool = True,
+        max_angular_rad_s: float = 2.0,
+        repulsion_gain: float = 500.0,
+        timeout: float = None,
+        *,
+        advance_radius: float | None = None,
+    ) -> MotionHandle:
+        """
+        Follow an ordered waypoint path using vector-blended Pure Pursuit and APF.
+
+        This algorithm combines a pure-pursuit steering vector with a repulsive
+        vector from obstacles to determine the final steering command.
+
+        waypoints           — [(x, y), ...] in the current user unit system
+        velocity            — maximum forward speed in user units/s
+        lookahead           — pure-pursuit lookahead distance in user units
+        tolerance           — goal tolerance in user units
+        repulsion_range     — obstacle detection range in user units
+        advance_radius      — optional intermediate waypoint acceptance radius
+        max_angular_rad_s   — maximum rotation rate
+        repulsion_gain      — strength of the repulsive vector
+        """
+        if not waypoints:
+            raise ValueError("waypoints must not be empty")
+
+        path_mm = [(float(x) * self._unit.value, float(y) * self._unit.value) for x, y in waypoints]
+        vel_mm = float(velocity) * self._unit.value
+        lookahead_mm = float(lookahead) * self._unit.value
+        tolerance_mm = float(tolerance) * self._unit.value
+        rep_range_mm = float(repulsion_range) * self._unit.value
+        advance_radius_mm = (
+            tolerance_mm if advance_radius is None
+            else float(advance_radius) * self._unit.value
+        )
+        max_angular = float(max_angular_rad_s)
+        rep_gain = float(repulsion_gain)
+
+        def target():
+            self._nav_follow_vector_blended_path(
+                path_mm, vel_mm, lookahead_mm, advance_radius_mm, tolerance_mm,
+                rep_range_mm, rep_gain, max_angular
+            )
+
+        return self._start_nav(target, blocking, timeout)
+
     def is_moving(self) -> bool:
         """True if a navigation command is active."""
         with self._nav_lock:
@@ -1109,6 +1161,51 @@ class NavigationMixin:
                 (x_mm, y_mm, theta_rad),
                 (goal_x_mm, goal_y_mm),
                 obstacle_disks,
+            )
+            self._send_body_velocity_mm(linear_mm, angular_rad_s)
+            if not self._sleep_with_cancel(dt):
+                break
+
+        self.stop()
+
+    def _nav_follow_vector_blended_path(
+        self,
+        waypoints_mm: list[tuple[float, float]],
+        max_vel_mm: float,
+        lookahead_mm: float,
+        advance_radius_mm: float,
+        tolerance_mm: float,
+        rep_range_mm: float,
+        rep_gain: float,
+        max_angular: float,
+        update_hz: float = float(DEFAULT_NAV_HZ),
+    ) -> None:
+        """Navigation thread body: follow a path using vector-blended pure pursuit and APF."""
+        from robot.path_planner import VectorBlendedPlanner
+        planner = VectorBlendedPlanner(
+            lookahead_dist=lookahead_mm,
+            max_angular=max_angular,
+            repulsion_gain=rep_gain,
+            repulsion_range=rep_range_mm,
+            goal_tolerance=tolerance_mm,
+        )
+        remaining_path = list(waypoints_mm)
+        dt = 1.0 / update_hz
+
+        while not self._nav_cancel.is_set():
+            x_mm, y_mm, theta_rad = self._get_pose_mm()
+            remaining_path = self._advance_remaining_path(
+                remaining_path, x_mm, y_mm, advance_radius_mm
+            )
+
+            if len(remaining_path) == 1 and _dist2d(x_mm, y_mm, remaining_path[0][0], remaining_path[0][1]) <= tolerance_mm:
+                self.stop()
+                return
+
+            obstacles_r = np.asarray(self._get_obstacles_mm())
+
+            linear_mm, angular_rad_s = planner.compute_velocity(
+                (x_mm, y_mm, theta_rad), remaining_path, obstacles_r, max_vel_mm
             )
             self._send_body_velocity_mm(linear_mm, angular_rad_s)
             if not self._sleep_with_cancel(dt):

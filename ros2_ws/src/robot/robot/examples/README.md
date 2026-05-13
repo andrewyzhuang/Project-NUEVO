@@ -29,6 +29,7 @@ runtime structure.
 |------|-------|
 | [`motion_basics.py`](motion_basics.py) | FSM loop with non-blocking and blocking drive commands |
 | [`pure_pursuit.py`](pure_pursuit.py) | Pure-pursuit waypoint following with optional lidar/GPS |
+| [`pp_blended.py`](pp_blended.py) | Vector-blended path following with obstacle avoidance |
 | [`lapf_to_goal.py`](lapf_to_goal.py) | Leashed APF virtual-target goal seeking with lidar |
 | [`traffic_light_leds.py`](traffic_light_leds.py) | Vision detections driving simple robot behavior |
 | [`user_io.py`](user_io.py) | Button, LED, and NeoPixel interaction patterns |

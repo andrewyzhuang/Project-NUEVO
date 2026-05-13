@@ -195,6 +195,7 @@ def run(robot):
 | `move_forward(distance, velocity, tolerance)` | Move forward in a straight line |
 | `turn_by(delta_deg)` | Rotate by a relative heading change |
 | `purepursuit_follow_path(waypoints, ...)` | Follow a multi-waypoint path |
+| `vector_blended_follow_path(waypoints, ...)`| Path following with blended obstacle avoidance |
 | `was_button_pressed(button_id)` | One-shot edge detection per button press |
 | `stop()` | Zero the drive motor velocities |
 
