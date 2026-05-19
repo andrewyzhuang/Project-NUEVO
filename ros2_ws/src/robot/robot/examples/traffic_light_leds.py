@@ -32,7 +32,12 @@ from __future__ import annotations
 
 import time
 
-from robot.hardware_map import DEFAULT_FSM_HZ, LED, POSITION_UNIT
+from robot.hardware_map import (
+    DEFAULT_FSM_HZ, LED, POSITION_UNIT,
+    WHEEL_DIAMETER, WHEEL_BASE, INITIAL_THETA_DEG,
+    LEFT_WHEEL_MOTOR, RIGHT_WHEEL_MOTOR,
+    LEFT_WHEEL_DIR_INVERTED, RIGHT_WHEEL_DIR_INVERTED,
+)
 from robot.robot import FirmwareState, Robot
 
 
@@ -53,8 +58,15 @@ MIN_TRAFFIC_LIGHT_CONFIDENCE = 0.50
 def configure_robot(robot: Robot) -> None:
     robot.set_unit(POSITION_UNIT)
     robot.enable_vision()
-
-
+    robot.set_odometry_parameters(
+        wheel_diameter=WHEEL_DIAMETER,
+        wheel_base=WHEEL_BASE,
+        initial_theta_deg=INITIAL_THETA_DEG,
+        left_motor_id=LEFT_WHEEL_MOTOR,
+        right_motor_id=RIGHT_WHEEL_MOTOR,
+        left_motor_dir_inverted=LEFT_WHEEL_DIR_INVERTED,
+        right_motor_dir_inverted=RIGHT_WHEEL_DIR_INVERTED,
+    )
 def start_robot(robot: Robot) -> None:
     current = robot.get_state()
     if current in (FirmwareState.ESTOP, FirmwareState.ERROR):
@@ -71,11 +83,11 @@ def show_traffic_light_color(robot: Robot, color: str) -> None:
     if color == "red":
         robot.set_led(LED.RED, LED_BRIGHTNESS)
         robot.set_led(LED.GREEN, 0)
+        robot.stop()
     elif color == "green":
         robot.set_led(LED.RED, 0)
         robot.set_led(LED.GREEN, LED_BRIGHTNESS)
-
-
+        robot.set_velocity(linear=200, angular_deg_s=0.0)
 def find_traffic_light_color(robot: Robot) -> str | None:
     """Return the best recent red/green traffic-light result, or None."""
     if not robot.is_vision_active(timeout_s=VISION_STALE_SEC):
