@@ -97,8 +97,8 @@ def show_traffic_light_color(robot: Robot, color: str) -> None:
 
 def run(robot: Robot) -> None:
     configure_robot(robot)
-
     state = "INIT"
+    drive_handle = None
     lights_off_at = 0.0
     last_shown_color = None
 
@@ -149,9 +149,8 @@ def run(robot: Robot) -> None:
             show_idle_leds(robot)
             robot._draw_lidar_obstacles()
             if robot.get_button(Button.BTN_1):
-                print("Start Moving!")
-                print("[FSM] MOVING")
-                state = "MOVING"
+                print("Start Scanning Traffic Light")
+                state = "SCANNING TRAFFIC LIGHT"
             if robot.get_button(Button.BTN_2):
                 print("BTN_2 pressed. Stopping robot and saving trajectory.")
                 robot.shutdown()
