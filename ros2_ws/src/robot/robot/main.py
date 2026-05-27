@@ -1,28 +1,89 @@
+"""
+pp_blended.py — FSM-based vector-blended pure-pursuit path following
+====================================================================
+Copy this file over main.py, then restart the robot node:
+
+    cp ros2_ws/src/robot/robot/examples/pp_blended.py ros2_ws/src/robot/robot/main.py
+    ros2 run robot robot
+
+BTN_1 starts the path. BTN_2 cancels and returns to IDLE.
+This example uses the vector-blended algorithm which adds a repulsive
+vector from detected lidar obstacles to the pure-pursuit steering vector.
+"""
+
 from __future__ import annotations
+
 import time
 
-from robot.robot import FirmwareState, Robot, Unit
-from robot.hardware_map import Button, DEFAULT_FSM_HZ, LED, Motor
-from robot.util import densify_polyline
-from robot.path_planner import PurePursuitPlanner
-import math
-import numpy as np
+from robot.hardware_map import (
+    Button,
+    DEFAULT_FSM_HZ,
+    LED,
+    INITIAL_THETA_DEG,
+    LIDAR_FOV_DEG,
+    LIDAR_MOUNT_THETA_DEG,
+    LIDAR_MOUNT_X_MM,
+    LIDAR_MOUNT_Y_MM,
+    LIDAR_RANGE_MAX_MM,
+    LIDAR_RANGE_MIN_MM,
+    LEFT_WHEEL_DIR_INVERTED,
+    LEFT_WHEEL_MOTOR,
+    POSITION_UNIT,
+    RIGHT_WHEEL_DIR_INVERTED,
+    RIGHT_WHEEL_MOTOR,
+    TAG_BODY_OFFSET_X_MM,
+    TAG_BODY_OFFSET_Y_MM,
+    WHEEL_BASE,
+    WHEEL_DIAMETER,
+)
+from robot.robot import FirmwareState, Robot
+from robot.util import densify_polyline  # noqa: F401 - optional helper for students
 
 
 # ---------------------------------------------------------------------------
-# Robot build configuration
+# Sensor toggles — set True if the corresponding node is running
 # ---------------------------------------------------------------------------
 
-TAG_ID = 21 # set aruco tag ID 
-POSITION_UNIT = Unit.MM
-WHEEL_DIAMETER = 74.0
-WHEEL_BASE = 333.0
-INITIAL_THETA_DEG = 90.0
+ENABLE_LIDAR = False   # Blended algorithm requires LIDAR for obstacle avoidance
+ENABLE_GPS   = False
 
-LEFT_WHEEL_MOTOR = Motor.DC_M1
-LEFT_WHEEL_DIR_INVERTED = False
-RIGHT_WHEEL_MOTOR = Motor.DC_M2
-RIGHT_WHEEL_DIR_INVERTED = True
+TAG_ID = -1  # set to the ArUco marker ID on your robot
+
+
+# ---------------------------------------------------------------------------
+# GPS tuning (only used when ENABLE_GPS = True)
+# ---------------------------------------------------------------------------
+
+GPS_POSITION_ALPHA           = 0.10
+ENABLE_GPS_TANGENT_HEADING   = False
+GPS_TANGENT_ALPHA            = 0.15
+GPS_TANGENT_MIN_DISPLACEMENT_MM = 200.0
+
+
+# ---------------------------------------------------------------------------
+# Path configuration
+# ---------------------------------------------------------------------------
+
+PATH_CONTROL_POINTS = [
+    (0.0, 0.0),
+    (0.0, 2000.0),
+    (1000.0, 2000.0),
+]
+
+# Optional: densify long segments for smoother tracking.
+# PATH_CONTROL_POINTS = densify_polyline(PATH_CONTROL_POINTS, spacing=50.0)
+
+VELOCITY_MM_S      = 150.0
+LOOKAHEAD_MM       = 150.0
+TOLERANCE_MM       = 25.0
+ADVANCE_RADIUS_MM  = 100.0
+MAX_ANGULAR_RAD_S  = 2.0
+
+# Blending parameters
+REPULSION_RANGE_MM = 400.0
+REPULSION_GAIN     = 500.0
+
+STATUS_PRINT_INTERVAL_S = 0.5
 
 
 def configure_robot(robot: Robot) -> None:
@@ -36,23 +97,79 @@ def configure_robot(robot: Robot) -> None:
         right_motor_id=RIGHT_WHEEL_MOTOR,
         right_motor_dir_inverted=RIGHT_WHEEL_DIR_INVERTED,
     )
-    robot.set_tracked_tag_id(TAG_ID) # set aruco tag ID as the tracked tag for localization
+
+    if ENABLE_LIDAR:
+        robot.enable_lidar()
+        robot.set_lidar_mount(
+            x_mm=LIDAR_MOUNT_X_MM,
+            y_mm=LIDAR_MOUNT_Y_MM,
+            theta_deg=LIDAR_MOUNT_THETA_DEG,
+        )
+        robot.set_lidar_filter(
+            range_min_mm=LIDAR_RANGE_MIN_MM,
+            range_max_mm=LIDAR_RANGE_MAX_MM,
+            fov_deg=LIDAR_FOV_DEG,
+        )
+        robot.start_lidar_world_publisher()
+        print("[sensor] lidar enabled — subscribing to /scan")
+
+    if ENABLE_GPS:
+        robot.enable_gps()
+        robot.set_tracked_tag_id(TAG_ID)
+        robot.set_tag_body_offset(TAG_BODY_OFFSET_X_MM, TAG_BODY_OFFSET_Y_MM)
+        robot.set_position_fusion_alpha(GPS_POSITION_ALPHA)
+        print(f"[sensor] GPS enabled — tracking ArUco tag {TAG_ID}")
+
+
+def start_robot(robot: Robot) -> None:
+    current = robot.get_state()
+    if current in (FirmwareState.ESTOP, FirmwareState.ERROR):
+        robot.reset_estop()
+    robot.set_state(FirmwareState.RUNNING)
+
+
+def reset_mission_pose(robot: Robot) -> None:
+    robot.reset_odometry()
+    if not robot.wait_for_odometry_reset(timeout=2.0):
+        print("[warn] odometry reset not confirmed within 2.0s; continuing with latest pose")
+        robot.wait_for_pose_update(timeout=0.5)
 
 
 def show_idle_leds(robot: Robot) -> None:
+    robot.set_led(LED.ORANGE, 200)
     robot.set_led(LED.GREEN, 0)
-    robot.set_led(LED.ORANGE, 255)
 
 
 def show_moving_leds(robot: Robot) -> None:
     robot.set_led(LED.ORANGE, 0)
-    robot.set_led(LED.GREEN, 255)
+    robot.set_led(LED.GREEN, 200)
 
 
-def start_robot(robot: Robot) -> None:
-    robot.set_state(FirmwareState.RUNNING)
-    robot.reset_odometry()
-    robot.wait_for_pose_update(timeout=0.2)
+def print_status(robot: Robot) -> None:
+    ox, oy, otheta = robot.get_odometry_pose()
+    if ENABLE_GPS and robot.has_fused_pose():
+        fx, fy, ftheta = robot.get_fused_pose()
+        print(
+            f"  odom=({ox:6.0f}, {oy:6.0f}) mm  θ_odom={otheta:5.1f}°  |  "
+            f"fused=({fx:6.0f}, {fy:6.0f}) mm  θ_fused={ftheta:5.1f}°  "
+            f"gps={'fresh' if robot.is_gps_active() else 'stale'}"
+        )
+    else:
+        print(f"  odom=({ox:6.0f}, {oy:6.0f}) mm  θ={otheta:5.1f}°")
+
+
+def start_path(robot: Robot):
+    return robot.vector_blended_follow_path(
+        waypoints=PATH_CONTROL_POINTS,
+        velocity=VELOCITY_MM_S,
+        lookahead=LOOKAHEAD_MM,
+        tolerance=TOLERANCE_MM,
+        repulsion_range=REPULSION_RANGE_MM,
+        repulsion_gain=REPULSION_GAIN,
+        advance_radius=ADVANCE_RADIUS_MM,
+        max_angular_rad_s=MAX_ANGULAR_RAD_S,
+        blocking=False,
+    )
 
 
 def run(robot: Robot) -> None:
@@ -60,68 +177,77 @@ def run(robot: Robot) -> None:
 
     state = "INIT"
     drive_handle = None
+    last_status_print_at = 0.0
+
     period = 1.0 / float(DEFAULT_FSM_HZ)
-    print(f"FSM period: {period:.3f} seconds")
     next_tick = time.monotonic()
 
     while True:
+        now = time.monotonic()
+
         if state == "INIT":
             start_robot(robot)
-            print("[FSM] INIT (odometry reset)")
-            # center lane
-            # path_control_points = [
-            #     (0.0,   0.0),
-            #     (0.0, 2500.0),
-            #     (1000.0, 2500.0),
-            # ]
-            # left lane
-            path_control_points = [
-                (300.0,   0.0),
-                (300.0, 2500.0),
-                (1300.0, 2500.0),
-            ]
-
-            path = densify_polyline(path_control_points, spacing=400.0)
-
-            robot._nav_follow_pp_path(
-                lookahead_distance=100.0,
-                max_linear_speed=140.0,
-                max_angular_speed=1.5,
-                goal_tolerance=20.0,
-                obstacles_range=450.0,
-                view_angle=math.radians(70.0),
-                safe_dist=250.0,
-                avoidance_delay=150,
-                alpha_Ld=0.7,
-                offset=270.0,
-                lane_width=500.0,
-                obstacle_avoidance=True,
-                x_L=300.0,
+            reset_mission_pose(robot)
+            show_idle_leds(robot)
+            print("[FSM] IDLE — press BTN_1 to start blended path, BTN_2 to cancel")
+            print(
+                f"[CFG] velocity={VELOCITY_MM_S:.0f} mm/s  lookahead={LOOKAHEAD_MM:.0f} mm  "
+                f"tolerance={TOLERANCE_MM:.0f} mm  repulsion_range={REPULSION_RANGE_MM:.0f} mm"
             )
-            robot.planner.set_path(path)
-            print("Path is ready, Entering IDLE state.")
-            print("[FSM] IDLE - Press BTN_1 to enter MOVING state.")
+            if ENABLE_LIDAR:
+                print(
+                    f"[CFG] lidar mount=({LIDAR_MOUNT_X_MM:.0f}, {LIDAR_MOUNT_Y_MM:.0f}) mm "
+                    f"theta={LIDAR_MOUNT_THETA_DEG:.1f}° filter={LIDAR_RANGE_MIN_MM:.0f}-"
+                    f"{LIDAR_RANGE_MAX_MM:.0f} mm fov={LIDAR_FOV_DEG}"
+                )
+            if ENABLE_GPS:
+                print(
+                    f"[CFG] gps tag_id={TAG_ID}  "
+                    f"tag_body=({TAG_BODY_OFFSET_X_MM:.0f}, {TAG_BODY_OFFSET_Y_MM:.0f}) mm  "
+                    f"position_alpha={GPS_POSITION_ALPHA:.2f}"
+                )
+                if ENABLE_GPS_TANGENT_HEADING:
+                    print(
+                        f"[CFG] heading=gps_tangent  "
+                        f"alpha={GPS_TANGENT_ALPHA:.2f}  "
+                        f"min_displacement={GPS_TANGENT_MIN_DISPLACEMENT_MM:.0f} mm"
+                    )
+                else:
+                    print("[CFG] heading=imu")
             state = "IDLE"
 
         elif state == "IDLE":
-            show_idle_leds(robot)
-            robot._draw_lidar_obstacles()
-            if robot.get_button(Button.BTN_1):
-                print("Start Moving!")
-                print("[FSM] MOVING")
+            if robot.was_button_pressed(Button.BTN_1):
+                reset_mission_pose(robot)
+                show_moving_leds(robot)
+                print(f"[FSM] MOVING (Blended) — {len(PATH_CONTROL_POINTS)} waypoints")
+                drive_handle = start_path(robot)
+                last_status_print_at = now
                 state = "MOVING"
-            if robot.get_button(Button.BTN_2):
-                print("BTN_2 pressed. Stopping robot and saving trajectory.")
-                robot.shutdown()
 
         elif state == "MOVING":
-            show_moving_leds(robot)
-            # if next_tick % 0.5 < period: # print every half second
-            #     robot._draw_lidar_obstacles()
-            #     print("Obstacle figure updated.")
-            state = robot._nav_follow_pp_path_loop()
+            if robot.was_button_pressed(Button.BTN_2):
+                if drive_handle is not None:
+                    drive_handle.cancel()
+                    drive_handle.wait(timeout=1.0)
+                    drive_handle = None
+                robot.stop()
+                show_idle_leds(robot)
+                print("[FSM] IDLE — path cancelled")
+                state = "IDLE"
+            else:
+                if now - last_status_print_at >= STATUS_PRINT_INTERVAL_S:
+                    print_status(robot)
+                    last_status_print_at = now
+                if drive_handle is not None and drive_handle.is_finished():
+                    print("[FSM] DONE — path complete")
+                    print_status(robot)
+                    drive_handle = None
+                    robot.stop()
+                    show_idle_leds(robot)
+                    print("[FSM] IDLE — press BTN_1 to run again")
+                    state = "IDLE"
 
-        # FSM refresh rate control
         next_tick += period
         sleep_s = next_tick - time.monotonic()
         if sleep_s > 0.0:
