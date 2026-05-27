@@ -1009,6 +1009,7 @@ class NavigationMixin:
         max_angular: float,
         update_hz: float = float(DEFAULT_NAV_HZ), # Assuming this exists in your namespace
     ) -> None:
+        from robot.path_planner import VectorBlendedPlanner
         planner = VectorBlendedPlanner(
             lookahead_dist=lookahead_mm,
             max_angular=max_angular,
