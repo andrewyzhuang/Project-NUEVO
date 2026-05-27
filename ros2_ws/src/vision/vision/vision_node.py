@@ -16,9 +16,8 @@ from vision.model_utils import (
     default_model_path,
     resolve_model_path,
 )
-from vision.rule_based_detection import (
-    detect_yellow_block,
-)
+from vision.rule_based_detection import (detect_yellow_block, detect_orange_patty)
+
 from vision.stop_sign import classify_stop_sign_visibility
 from vision.timing_utils import FixedRateScheduler
 from vision.traffic_light import classify_traffic_light_color
@@ -155,6 +154,9 @@ class VisionNode(Node):
 
     def _detect_yellow_block(self, frame):
         return detect_yellow_block(frame)
+    
+    def _detect_orange_block(self, frame):
+        return detect_orange_patty(frame)
 
     def _build_detection_msg(self, detected_object: DetectedObject) -> VisionDetection:
         detection = VisionDetection()
@@ -208,6 +210,7 @@ class VisionNode(Node):
             try:
                 yolo_detections = self._infer_yolo_detections(frame)
                 yellow_block_detections, yellow_block_overlays = self._detect_yellow_block(frame)
+                orange_block_detections, orange_block_overlays = self._detect_orange_block(frame)
                 
                 for detection in yolo_detections:
                     object_crop = frame[
@@ -232,13 +235,14 @@ class VisionNode(Node):
                         face_lighting_label, face_lighting_score = classify_person_face_lighting(person_crop)
                         detection.add_attribute("face_lighting", face_lighting_label, face_lighting_score)
                 
-                all_detections = yolo_detections + yellow_block_detections
+                all_detections = yolo_detections + yellow_block_detections + orange_block_detections
 
                 message = self._build_detection_array_msg(
                     capture_stamp=capture_stamp,
                     image_width=frame.shape[1],
                     image_height=frame.shape[0],
                     detected_objects=all_detections,
+                    debug_overlays=yellow_block_overlays + orange_block_overlays, 
                 )
                 self._publisher.publish(message)
                 self._debug_writer.maybe_write(
@@ -248,11 +252,13 @@ class VisionNode(Node):
                 )
                 yolo_count = len(yolo_detections)
                 yellow_block_count = len(yellow_block_detections)
+                orange_block_count = len(orange_block_detections)
                 detection_count = len(message.detections)
             except Exception as exc:
                 self.get_logger().error(f"Vision inference failed for one frame: {exc}")
                 yolo_count = 0
                 yellow_block_count = 0
+                orange_block_count = 0
                 detection_count = 0
             inference_ms = (time.monotonic() - inference_start) * 1000.0
 
@@ -270,6 +276,7 @@ class VisionNode(Node):
                         self._detector.last_postprocess_ms,
                         yolo_count,
                         yellow_block_count,
+                        orange_block_count,
                         detection_count,
                         self._process_rate_hz,
                     )

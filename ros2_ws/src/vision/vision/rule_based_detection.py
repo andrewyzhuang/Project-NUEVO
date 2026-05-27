@@ -78,3 +78,71 @@ def yellow_detection_score(contour_area: float, min_area_px: int, fill_ratio: fl
     area_score = min(1.0, contour_area / float(max(1, min_area_px * 4)))
     score = 0.55 * area_score + 0.45 * max(0.0, min(1.0, fill_ratio))
     return max(0.0, min(1.0, score))
+
+
+def detect_orange_patty(
+    frame_bgr: np.ndarray,
+) -> tuple[list[DetectedObject], list[DebugOverlay]]:
+    """Detect a 3D-printed orange patty and return detections plus debug contours."""
+    detections: list[DetectedObject] = []
+    debug_overlays: list[DebugOverlay] = []
+
+    blurred = cv2.GaussianBlur(frame_bgr, (5, 5), 0)
+    hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
+
+    # Orange HSV range for 3D-printed patty under indoor fluorescent light.
+    # Hue 5-18 captures orange without bleeding into yellow (18+) or red (0-5).
+    # Saturation 120+ filters out the beige/tan background in the image.
+    orange_hsv_low  = (5,  120, 80)
+    orange_hsv_high = (18, 255, 255)
+    mask = cv2.inRange(hsv, orange_hsv_low, orange_hsv_high)
+
+    open_kernel  = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN,  open_kernel)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel)
+
+    min_area_px    = 500
+    min_fill_ratio = 0.30
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for contour in contours:
+        contour_area = float(cv2.contourArea(contour))
+        if contour_area < min_area_px:
+            continue
+
+        x, y, width, height = cv2.boundingRect(contour)
+        bounding_box_area = float(max(1, width * height))
+        fill_ratio = contour_area / bounding_box_area
+        if fill_ratio < min_fill_ratio:
+            continue
+
+        confidence = orange_detection_score(contour_area, min_area_px, fill_ratio)
+        detection = DetectedObject(
+            class_name="patty",
+            confidence=confidence,
+            x=int(x),
+            y=int(y),
+            width=int(width),
+            height=int(height),
+        )
+        detection.add_attribute("color", "orange", 1.0)
+        detections.append(detection)
+        debug_overlays.append(
+            DebugOverlay(
+                color=(0, 165, 255),  # orange in BGR
+                contour=contour,
+                label="patty",
+                x=int(x),
+                y=int(y),
+            )
+        )
+
+    return detections, debug_overlays
+
+
+def orange_detection_score(contour_area: float, min_area_px: int, fill_ratio: float) -> float:
+    """Build a simple 0-1 confidence score from area and shape compactness."""
+    area_score = min(1.0, contour_area / float(max(1, min_area_px * 4)))
+    score = 0.55 * area_score + 0.45 * max(0.0, min(1.0, fill_ratio))
+    return max(0.0, min(1.0, score))
