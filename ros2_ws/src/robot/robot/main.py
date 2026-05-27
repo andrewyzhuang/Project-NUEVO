@@ -44,7 +44,7 @@ from robot.util import densify_polyline  # noqa: F401 - optional helper for stud
 # Sensor toggles — set True if the corresponding node is running
 # ---------------------------------------------------------------------------
 
-ENABLE_LIDAR = False   # Blended algorithm requires LIDAR for obstacle avoidance
+ENABLE_LIDAR = True   # Blended algorithm requires LIDAR for obstacle avoidance
 ENABLE_GPS   = False
 
 TAG_ID = -1  # set to the ArUco marker ID on your robot
@@ -67,17 +67,18 @@ GPS_TANGENT_MIN_DISPLACEMENT_MM = 200.0
 PATH_CONTROL_POINTS = [
     (0.0, 0.0),
     (0.0, 2000.0),
-    (1000.0, 2000.0),
+    (600.0, 2000.0),
+    (600.0, 0)
 ]
 
 # Optional: densify long segments for smoother tracking.
-# PATH_CONTROL_POINTS = densify_polyline(PATH_CONTROL_POINTS, spacing=50.0)
+PATH_CONTROL_POINTS = densify_polyline(PATH_CONTROL_POINTS, spacing=50.0)
 
 VELOCITY_MM_S      = 150.0
 LOOKAHEAD_MM       = 150.0
 TOLERANCE_MM       = 25.0
 ADVANCE_RADIUS_MM  = 100.0
-MAX_ANGULAR_RAD_S  = 2.0
+MAX_ANGULAR_RAD_S  = 0.8
 
 # Blending parameters
 REPULSION_RANGE_MM = 400.0
