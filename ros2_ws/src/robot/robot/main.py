@@ -71,9 +71,6 @@ PATH_CONTROL_POINTS = [
     (600.0, 0)
 ]
 
-# Optional: densify long segments for smoother tracking.
-PATH_CONTROL_POINTS = densify_polyline(PATH_CONTROL_POINTS, spacing=50.0)
-
 VELOCITY_MM_S      = 150.0
 LOOKAHEAD_MM       = 150.0
 TOLERANCE_MM       = 25.0
@@ -81,8 +78,8 @@ ADVANCE_RADIUS_MM  = 100.0
 MAX_ANGULAR_RAD_S  = 0.8
 
 # Blending parameters
-REPULSION_RANGE_MM = 400.0
-REPULSION_GAIN     = 500.0
+REPULSION_RANGE_MM = 300.0
+REPULSION_GAIN     = 600.0
 
 STATUS_PRINT_INTERVAL_S = 0.5
 
