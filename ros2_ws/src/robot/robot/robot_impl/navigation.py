@@ -696,162 +696,6 @@ class NavigationMixin:
 
         return self._start_nav(target, blocking, timeout)
 
-    def lapf_to_goal(
-        self,
-        x: float,
-        y: float,
-        velocity: float,
-        tolerance: float,
-        leash_length_mm: float | None = None,
-        repulsion_range_mm: float | None = None,
-        target_speed_mm_s: float | None = None,
-        blocking: bool = True,
-        max_angular_rad_s: float = 1.0,
-        repulsion_gain: float | None = None,
-        attraction_gain: float | None = None,
-        force_ema_alpha: float | None = None,
-        inflation_margin_mm: float | None = None,
-        leash_half_angle_deg: float | None = None,
-        timeout: float = None,
-    ) -> MotionHandle:
-        """
-        Navigate to one goal using a leashed APF virtual target.
-
-        The virtual target runs a point-based APF simulation in world frame,
-        constrained to remain inside a forward leash cone relative to the robot.
-        The real robot tracks that moving target with a single-point
-        pure-pursuit-derived controller.
-        """
-        goal_x_mm = float(x) * self._unit.value
-        goal_y_mm = float(y) * self._unit.value
-        vel_mm = float(velocity) * self._unit.value
-        tolerance_mm = float(tolerance) * self._unit.value
-        leash_length_mm = float(
-            self.LAPF_LEASH_LENGTH_MM if leash_length_mm is None else leash_length_mm
-        )
-        repulsion_range_mm = float(
-            self.LAPF_REPULSION_RANGE_MM if repulsion_range_mm is None else repulsion_range_mm
-        )
-        target_speed_mm_s = float(
-            self.LAPF_TARGET_SPEED_MM_S if target_speed_mm_s is None else target_speed_mm_s
-        )
-        max_angular = float(max_angular_rad_s)
-        repulsion_gain = float(
-            self.LAPF_REPULSION_GAIN if repulsion_gain is None else repulsion_gain
-        )
-        attraction_gain = float(
-            self.LAPF_ATTRACTION_GAIN if attraction_gain is None else attraction_gain
-        )
-        force_ema_alpha = float(
-            self.LAPF_FORCE_EMA_ALPHA if force_ema_alpha is None else force_ema_alpha
-        )
-        inflation_margin_mm = float(
-            self.LAPF_INFLATION_MARGIN_MM if inflation_margin_mm is None else inflation_margin_mm
-        )
-        leash_half_angle_deg = float(
-            self.LAPF_LEASH_HALF_ANGLE_DEG if leash_half_angle_deg is None else leash_half_angle_deg
-        )
-
-        def target():
-            self._nav_lapf_to_goal(
-                (goal_x_mm, goal_y_mm),
-                vel_mm,
-                tolerance_mm,
-                leash_length_mm,
-                repulsion_range_mm,
-                target_speed_mm_s,
-                max_angular,
-                repulsion_gain,
-                attraction_gain,
-                force_ema_alpha,
-                inflation_margin_mm,
-                leash_half_angle_deg,
-            )
-
-        return self._start_nav(target, blocking, timeout)
-
-    def lapf_follow_path(
-        self,
-        waypoints: list[tuple[float, float]],
-        velocity: float,
-        tolerance: float,
-        leash_length_mm: float | None = None,
-        repulsion_range_mm: float | None = None,
-        target_speed_mm_s: float | None = None,
-        blocking: bool = True,
-        max_angular_rad_s: float = 1.0,
-        repulsion_gain: float | None = None,
-        attraction_gain: float | None = None,
-        force_ema_alpha: float | None = None,
-        inflation_margin_mm: float | None = None,
-        leash_half_angle_deg: float | None = None,
-        advance_radius: float | None = None,
-        timeout: float = None,
-    ) -> MotionHandle:
-        """
-        Follow an ordered waypoint path using leashed APF virtual targets.
-
-        waypoints           — [(x, y), ...] in the current user unit system
-        velocity            — maximum forward speed in user units/s
-        tolerance           — goal tolerance in user units
-        advance_radius      — optional intermediate waypoint acceptance radius
-                              in user units; defaults to tolerance
-        """
-        if not waypoints:
-            raise ValueError("waypoints must not be empty")
-
-        path_mm = [(float(x) * self._unit.value, float(y) * self._unit.value) for x, y in waypoints]
-        vel_mm = float(velocity) * self._unit.value
-        tolerance_mm = float(tolerance) * self._unit.value
-        advance_radius_mm = (
-            tolerance_mm if advance_radius is None
-            else float(advance_radius) * self._unit.value
-        )
-        leash_length_mm = float(
-            self.LAPF_LEASH_LENGTH_MM if leash_length_mm is None else leash_length_mm
-        )
-        repulsion_range_mm = float(
-            self.LAPF_REPULSION_RANGE_MM if repulsion_range_mm is None else repulsion_range_mm
-        )
-        target_speed_mm_s = float(
-            self.LAPF_TARGET_SPEED_MM_S if target_speed_mm_s is None else target_speed_mm_s
-        )
-        max_angular = float(max_angular_rad_s)
-        repulsion_gain = float(
-            self.LAPF_REPULSION_GAIN if repulsion_gain is None else repulsion_gain
-        )
-        attraction_gain = float(
-            self.LAPF_ATTRACTION_GAIN if attraction_gain is None else attraction_gain
-        )
-        force_ema_alpha = float(
-            self.LAPF_FORCE_EMA_ALPHA if force_ema_alpha is None else force_ema_alpha
-        )
-        inflation_margin_mm = float(
-            self.LAPF_INFLATION_MARGIN_MM if inflation_margin_mm is None else inflation_margin_mm
-        )
-        leash_half_angle_deg = float(
-            self.LAPF_LEASH_HALF_ANGLE_DEG if leash_half_angle_deg is None else leash_half_angle_deg
-        )
-
-        def target():
-            self._nav_lapf_follow_path(
-                path_mm,
-                vel_mm,
-                tolerance_mm,
-                advance_radius_mm,
-                leash_length_mm,
-                repulsion_range_mm,
-                target_speed_mm_s,
-                max_angular,
-                repulsion_gain,
-                attraction_gain,
-                force_ema_alpha,
-                inflation_margin_mm,
-                leash_half_angle_deg,
-            )
-
-        return self._start_nav(target, blocking, timeout)
-
     def vector_blended_follow_path(
         self,
         waypoints: list[tuple[float, float]],
@@ -865,22 +709,7 @@ class NavigationMixin:
         timeout: float = None,
         *,
         advance_radius: float | None = None,
-    ) -> MotionHandle:
-        """
-        Follow an ordered waypoint path using vector-blended Pure Pursuit and APF.
-
-        This algorithm combines a pure-pursuit steering vector with a repulsive
-        vector from obstacles to determine the final steering command.
-
-        waypoints           — [(x, y), ...] in the current user unit system
-        velocity            — maximum forward speed in user units/s
-        lookahead           — pure-pursuit lookahead distance in user units
-        tolerance           — goal tolerance in user units
-        repulsion_range     — obstacle detection range in user units
-        advance_radius      — optional intermediate waypoint acceptance radius
-        max_angular_rad_s   — maximum rotation rate
-        repulsion_gain      — strength of the repulsive vector
-        """
+    ):
         if not waypoints:
             raise ValueError("waypoints must not be empty")
 
@@ -1178,10 +1007,8 @@ class NavigationMixin:
         rep_range_mm: float,
         rep_gain: float,
         max_angular: float,
-        update_hz: float = float(DEFAULT_NAV_HZ),
+        update_hz: float = float(DEFAULT_NAV_HZ), # Assuming this exists in your namespace
     ) -> None:
-        """Navigation thread body: follow a path using vector-blended pure pursuit and APF."""
-        from robot.path_planner import VectorBlendedPlanner
         planner = VectorBlendedPlanner(
             lookahead_dist=lookahead_mm,
             max_angular=max_angular,
@@ -1198,7 +1025,8 @@ class NavigationMixin:
                 remaining_path, x_mm, y_mm, advance_radius_mm
             )
 
-            if len(remaining_path) == 1 and _dist2d(x_mm, y_mm, remaining_path[0][0], remaining_path[0][1]) <= tolerance_mm:
+            # Dist2d helper equivalent
+            if len(remaining_path) == 1 and math.hypot(x_mm - remaining_path[0][0], y_mm - remaining_path[0][1]) <= tolerance_mm:
                 self.stop()
                 return
 
@@ -1212,157 +1040,6 @@ class NavigationMixin:
                 break
 
         self.stop()
-
-    def _nav_lapf_to_goal(
-        self,
-        goal_mm: tuple[float, float],
-        max_vel_mm: float,
-        tolerance_mm: float,
-        leash_length_mm: float,
-        repulsion_range_mm: float,
-        target_speed_mm_s: float,
-        max_angular_rad_s: float,
-        repulsion_gain: float,
-        attraction_gain: float,
-        force_ema_alpha: float,
-        inflation_margin_mm: float,
-        leash_half_angle_deg: float,
-        update_hz: float = float(DEFAULT_NAV_HZ),
-    ) -> None:
-        from robot.path_planner import LeashedAPFPlanner
-
-        tracker_lookahead_mm = max(100.0, min(leash_length_mm, 250.0))
-        planner = LeashedAPFPlanner(
-            max_linear=max_vel_mm,
-            max_angular=max_angular_rad_s,
-            target_speed=target_speed_mm_s,
-            repulsion_gain=repulsion_gain,
-            repulsion_range=repulsion_range_mm,
-            goal_tolerance=tolerance_mm,
-            attraction_gain=attraction_gain,
-            force_ema_alpha=force_ema_alpha,
-            leash_length_mm=leash_length_mm,
-            leash_half_angle_deg=leash_half_angle_deg,
-            inflation_margin_mm=inflation_margin_mm,
-            tracker_lookahead_mm=tracker_lookahead_mm,
-        )
-        dt = 1.0 / update_hz
-        fetch_radius_mm = (
-            repulsion_range_mm
-            + leash_length_mm
-            + inflation_margin_mm
-            + float(self.APF_TRACK_INPUT_MARGIN_MM)
-        )
-
-        while not self._nav_cancel.is_set():
-            pose_mm = self._get_pose_mm()
-            x_mm, y_mm, _theta_rad = pose_mm
-            goal_x_mm, goal_y_mm = goal_mm
-
-            if _dist2d(x_mm, y_mm, goal_x_mm, goal_y_mm) <= tolerance_mm:
-                self.stop()
-                self._set_virtual_target_world_mm(None)
-                return
-
-            obstacle_disks = self._get_nearest_tracked_obstacle_disks_world_mm(
-                pose_mm,
-                fetch_radius_mm,
-                int(self.LAPF_MAX_PLANNER_TRACKS),
-            )
-
-            linear_mm, angular_rad_s = planner.navigate_to_goal(
-                pose_mm,
-                goal_mm,
-                obstacle_disks,
-                dt,
-            )
-            self._set_virtual_target_world_mm(planner.get_virtual_target())
-            self._send_body_velocity_mm(linear_mm, angular_rad_s)
-            if not self._sleep_with_cancel(dt):
-                break
-
-        self.stop()
-        self._set_virtual_target_world_mm(None)
-
-    def _nav_lapf_follow_path(
-        self,
-        waypoints_mm: list[tuple[float, float]],
-        max_vel_mm: float,
-        tolerance_mm: float,
-        advance_radius_mm: float,
-        leash_length_mm: float,
-        repulsion_range_mm: float,
-        target_speed_mm_s: float,
-        max_angular_rad_s: float,
-        repulsion_gain: float,
-        attraction_gain: float,
-        force_ema_alpha: float,
-        inflation_margin_mm: float,
-        leash_half_angle_deg: float,
-        update_hz: float = float(DEFAULT_NAV_HZ),
-    ) -> None:
-        """Navigation thread body: follow a path using leashed APF."""
-        from robot.path_planner import LeashedAPFPlanner
-
-        tracker_lookahead_mm = max(100.0, min(leash_length_mm, 250.0))
-        planner = LeashedAPFPlanner(
-            max_linear=max_vel_mm,
-            max_angular=max_angular_rad_s,
-            target_speed=target_speed_mm_s,
-            repulsion_gain=repulsion_gain,
-            repulsion_range=repulsion_range_mm,
-            goal_tolerance=tolerance_mm,
-            attraction_gain=attraction_gain,
-            force_ema_alpha=force_ema_alpha,
-            leash_length_mm=leash_length_mm,
-            leash_half_angle_deg=leash_half_angle_deg,
-            inflation_margin_mm=inflation_margin_mm,
-            tracker_lookahead_mm=tracker_lookahead_mm,
-        )
-        remaining_path = list(waypoints_mm)
-        dt = 1.0 / update_hz
-        fetch_radius_mm = (
-            repulsion_range_mm
-            + leash_length_mm
-            + inflation_margin_mm
-            + float(self.APF_TRACK_INPUT_MARGIN_MM)
-        )
-
-        while not self._nav_cancel.is_set():
-            pose_mm = self._get_pose_mm()
-            x_mm, y_mm, _theta_rad = pose_mm
-            
-            remaining_path = self._advance_remaining_path(
-                remaining_path, x_mm, y_mm, advance_radius_mm
-            )
-
-            goal_mm = remaining_path[0]
-            goal_x_mm, goal_y_mm = goal_mm
-
-            if len(remaining_path) == 1 and _dist2d(x_mm, y_mm, goal_x_mm, goal_y_mm) <= tolerance_mm:
-                self.stop()
-                self._set_virtual_target_world_mm(None)
-                return
-
-            obstacle_disks = self._get_nearest_tracked_obstacle_disks_world_mm(
-                pose_mm,
-                fetch_radius_mm,
-                int(self.LAPF_MAX_PLANNER_TRACKS),
-            )
-
-            linear_mm, angular_rad_s = planner.navigate_to_goal(
-                pose_mm,
-                goal_mm,
-                obstacle_disks,
-                dt,
-            )
-            self._set_virtual_target_world_mm(planner.get_virtual_target())
-            self._send_body_velocity_mm(linear_mm, angular_rad_s)
-            if not self._sleep_with_cancel(dt):
-                break
-
-        self.stop()
-        self._set_virtual_target_world_mm(None)
 
     def _nav_follow_path(
         self,

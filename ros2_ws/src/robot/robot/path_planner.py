@@ -771,13 +771,13 @@ def _wrap_angle(a: float) -> float:
 # Vector Blended Pure Pursuit
 # =============================================================================
 
-class VectorBlendedPlanner(PathPlanner):
+class VectorBlendedPlanner:
     """
     Vector-blended Pure Pursuit and Artificial Potential Fields planner.
 
-    This algorithm uses basic pure pursuit to calculate a steering vector
-    toward a lookahead point. It then adds a repulsive vector from any
-    detected obstacles (cones) to determine the final steering direction.
+    This algorithm uses basic pure pursuit to calculate an attractive steering 
+    vector toward a lookahead point. It then adds a repulsive and tangential 
+    vector from detected obstacles to determine the final steering direction.
     """
 
     def __init__(
@@ -793,6 +793,9 @@ class VectorBlendedPlanner(PathPlanner):
         self.rep_gain = repulsion_gain
         self.rep_range = repulsion_range
         self.goal_tolerance = goal_tolerance
+        
+        # Tracks which side we committed to passing on to prevent oscillation
+        self._committed_left: bool | None = None
 
     def compute_velocity(
         self,
@@ -801,14 +804,6 @@ class VectorBlendedPlanner(PathPlanner):
         obstacles_r: np.ndarray,
         max_linear: float,
     ) -> tuple[float, float]:
-        """
-        Return (linear_mm_s, angular_rad_s) blending pure pursuit and APF.
-
-        pose        - (x, y, theta_rad) world frame
-        waypoints   - ordered list of (x, y) world frame
-        obstacles_r - (N, 2) array of obstacles in robot frame
-        max_linear  - maximum forward speed
-        """
         px, py, theta = pose
 
         # 1. Target Reached check
@@ -823,56 +818,84 @@ class VectorBlendedPlanner(PathPlanner):
         dx = tx - px
         dy = ty - py
 
-        # Transform lookahead point to robot frame
         cos_th = math.cos(theta)
         sin_th = math.sin(theta)
         lx_r = cos_th * dx + sin_th * dy
         ly_r = -sin_th * dx + cos_th * dy
 
         l_dist = math.hypot(lx_r, ly_r)
-        # Attraction vector unit vector in robot frame
-        attr_vx = lx_r / l_dist if l_dist > 1e-6 else 0.0
-        attr_vy = ly_r / l_dist if l_dist > 1e-6 else 0.0
 
-        # 3. Repulsive Vector in Robot Frame
-        rep_vx = 0.0
-        rep_vy = 0.0
+        # Weight the attractive vector so it can compete with repulsion.
+        # Setting it to half the rep_gain means repulsion only overpowers 
+        # the path tracking when the rover gets critically close to a cone.
+        attr_mag = self.rep_gain * 0.5
+        attr_vx = (lx_r / l_dist) * attr_mag if l_dist > 1e-6 else 0.0
+        attr_vy = (ly_r / l_dist) * attr_mag if l_dist > 1e-6 else 0.0
+
+        # 3. Repulsive & Tangential Vectors in Robot Frame
+        rep_vx, rep_vy = 0.0, 0.0
+        tan_vx, tan_vy = 0.0, 0.0
+        obstacle_scale = 1.0
 
         if obstacles_r is not None and obstacles_r.size > 0:
-            # obstacles_r is (N, 2) in robot frame
             ox = obstacles_r[:, 0]
             oy = obstacles_r[:, 1]
-            dists = np.sqrt(ox*ox + oy*oy)
+            dists = np.maximum(np.sqrt(ox*ox + oy*oy), 1e-6)
 
-            # Filter by range
-            in_range = (dists < self.rep_range) & (dists > 10.0)
+            in_range = dists < self.rep_range
             if np.any(in_range):
                 d = dists[in_range]
-                # Magnitude scales inversely with distance
-                mag = self.rep_gain / d
+                
+                # Smooth proximity scalar: 1.0 at impact, 0.0 at rep_range edge
+                proximity = 1.0 - (d / self.rep_range)
+                mag = self.rep_gain * proximity * proximity
 
-                # Direction away from cone: robot(0,0) - cone(ox,oy) = (-ox, -oy)
+                # Radial Repulsion (pushes directly away from cone)
                 ux = -ox[in_range] / d
                 uy = -oy[in_range] / d
-
                 rep_vx = float(np.sum(mag * ux))
                 rep_vy = float(np.sum(mag * uy))
 
+                # Tangential Swirl (breaks head-on local minima)
+                if self._committed_left is None:
+                    # Look at the closest cone. If it's on our right (oy < 0), swirl left.
+                    closest_idx = np.argmin(d)
+                    self._committed_left = oy[in_range][closest_idx] < 0
+
+                # Tangential force is orthogonal to radial force
+                if self._committed_left:
+                    tx_tan, ty_tan = -uy, ux   # Swirl Left
+                else:
+                    tx_tan, ty_tan = uy, -ux   # Swirl Right
+
+                # Tangential magnitude scales with repulsion but is slightly weaker
+                tan_mag = mag * 0.75
+                tan_vx = float(np.sum(tan_mag * tx_tan))
+                tan_vy = float(np.sum(tan_mag * ty_tan))
+
+                # Speed scaling: physically slow down if a cone is directly ahead
+                fwd_mask = ox[in_range] > 0
+                if np.any(fwd_mask):
+                    min_fwd_dist = np.min(d[fwd_mask])
+                    obstacle_scale = max(0.15, min(1.0, min_fwd_dist / self.rep_range))
+            else:
+                self._committed_left = None
+        else:
+            self._committed_left = None
+
         # 4. Blending
-        total_vx = attr_vx + rep_vx
-        total_vy = attr_vy + rep_vy
+        total_vx = attr_vx + rep_vx + tan_vx
+        total_vy = attr_vy + rep_vy + tan_vy
 
         # 5. Steering
-        # Angle of the combined vector in robot frame
         steering_angle = math.atan2(total_vy, total_vx)
 
-        # Proportional control for angular velocity
-        # Simple gain of 2.0 to map angle to rad/s
         angular = 2.0 * steering_angle
-        angular = np.clip(angular, -self.w_max, self.w_max)
+        angular = max(-self.w_max, min(self.w_max, angular))
 
-        # Linear velocity: slow down if we are turning hard
-        linear = max_linear * max(0.0, math.cos(steering_angle))
+        # Linear velocity: throttle down for sharp turns and forward obstacles
+        turn_slowdown = max(0.0, math.cos(steering_angle))
+        linear = max_linear * turn_slowdown * obstacle_scale
 
         return float(linear), float(angular)
 
