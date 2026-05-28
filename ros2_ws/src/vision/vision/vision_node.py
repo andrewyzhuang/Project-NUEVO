@@ -242,13 +242,12 @@ class VisionNode(Node):
                     image_width=frame.shape[1],
                     image_height=frame.shape[0],
                     detected_objects=all_detections,
-                    debug_overlays=yellow_block_overlays + orange_block_overlays, 
                 )
                 self._publisher.publish(message)
                 self._debug_writer.maybe_write(
                     frame_bgr=frame,
                     detected_objects=all_detections,
-                    debug_overlays=yellow_block_overlays,
+                    debug_overlays=yellow_block_overlays + orange_block_overlays,
                 )
                 yolo_count = len(yolo_detections)
                 yellow_block_count = len(yellow_block_detections)
@@ -266,7 +265,7 @@ class VisionNode(Node):
             if now - self._last_loop_summary >= self._log_interval_sec:
                 self._last_loop_summary = now
                 self.get_logger().info(
-                    "Vision frame %dx%d total=%.1fms preprocess=%.1fms ncnn=%.1fms postprocess=%.1fms yolo=%d yellow_block=%d total=%d target_rate=%.1fHz"
+                    "Vision frame %dx%d total=%.1fms preprocess=%.1fms ncnn=%.1fms postprocess=%.1fms yolo=%d yellow_block=%d orange_block=%d total=%d target_rate=%.1fHz"
                     % (
                         frame.shape[1],
                         frame.shape[0],

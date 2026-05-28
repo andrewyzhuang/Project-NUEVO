@@ -36,9 +36,9 @@ def dim_all_leds(robot: Robot) -> None:
 def show_detected_ingredient_led(robot: Robot, ingredient: str) -> None:
     if ingredient == "bun":
         robot.set_led(LED.ORANGE, LED_BRIGHTNESS)
-        robot.set_led(LED.RED, 0)
+        robot.set_led(LED.GREEN, 0)
     elif ingredient == "patty":
-        robot.set_led(LED.RED, LED_BRIGHTNESS)
+        robot.set_led(LED.GREEN, LED_BRIGHTNESS)
         robot.set_led(LED.ORANGE, 0)
 
 
