@@ -150,33 +150,41 @@ def run(robot: Robot) -> None:
             robot._draw_lidar_obstacles()
             if robot.get_button(Button.BTN_1):
                 print("Start Scanning Traffic Light")
-                state = "SCANNING TRAFFIC LIGHT"
+                state = "WATCHING"
             if robot.get_button(Button.BTN_2):
                 print("BTN_2 pressed. Stopping robot and saving trajectory.")
                 robot.shutdown()
         
-        elif state == "SCANNING TRAFFIC LIGHT":
+        elif state == "WATCHING":
             now = time.monotonic()
-            traffic_light_color = find_traffic_light_color(robot)
-
-            if traffic_light_color in ("red", "green"):
-                show_traffic_light_color(robot, traffic_light_color)
-                lights_off_at = now + LIGHT_HOLD_SEC
-
-                if traffic_light_color != last_shown_color:
-                    print(f"[VISION] traffic light: {traffic_light_color}")
-                last_shown_color = traffic_light_color
-                
-                if traffic_light_color == "green":
-                    state = "MOVING"
-
-            elif lights_off_at > 0.0 and now >= lights_off_at:
-                robot.set_led(LED.RED, 0)
+            # Stop sign takes priority over traffic light colour.
+            if robot.get_detections("stop sign"):
+                robot.stop()
+                robot.set_led(LED.RED, LED_BRIGHTNESS)
                 robot.set_led(LED.GREEN, 0)
-                lights_off_at = 0.0
-                if last_shown_color is not None:
-                    print("[VISION] no recent red/green light - LEDs off")
                 last_shown_color = None
+                lights_off_at = 0.0
+            else:
+                traffic_light_color = find_traffic_light_color(robot)
+
+                if traffic_light_color in ("red", "green"):
+                    show_traffic_light_color(robot, traffic_light_color)
+                    lights_off_at = now + LIGHT_HOLD_SEC
+
+                    if traffic_light_color != last_shown_color:
+                        print(f"[VISION] traffic light: {traffic_light_color}")
+                    last_shown_color = traffic_light_color
+                    
+                    if traffic_light_color == "green":
+                        state = "MOVING"
+
+                elif lights_off_at > 0.0 and now >= lights_off_at:
+                    robot.set_led(LED.RED, 0)
+                    robot.set_led(LED.GREEN, 0)
+                    lights_off_at = 0.0
+                    if last_shown_color is not None:
+                        print("[VISION] no recent red/green light - LEDs off")
+                    last_shown_color = None
 
         elif state == "MOVING":
             show_moving_leds(robot)
