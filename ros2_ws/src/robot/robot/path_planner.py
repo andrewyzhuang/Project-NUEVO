@@ -858,11 +858,24 @@ class VectorBlendedPlanner:
 
                 # Tangential Swirl (breaks head-on local minima)
                 if self._committed_left is None:
-                    # Look at the closest cone. If it's on our right (oy < 0), swirl left.
+                    # Find the closest cone to make the choice
                     closest_idx = np.argmin(d)
-                    self._committed_left = oy[in_range][closest_idx] < 0
+                    closest_ux = ux[closest_idx] # This vector points AWAY from the cone
+                    closest_uy = uy[closest_idx]
+                    
+                    # Calculate the two possible swirl vectors for the closest cone
+                    left_tx, left_ty = -closest_uy, closest_ux
+                    right_tx, right_ty = closest_uy, -closest_ux
+                    
+                    # Dot product: Which swirl direction aligns better with our Pure Pursuit goal?
+                    # lx_r and ly_r are the unscaled Pure Pursuit vector we calculated in Step 2
+                    left_score = (left_tx * lx_r) + (left_ty * ly_r)
+                    right_score = (right_tx * lx_r) + (right_ty * ly_r)
+                    
+                    # Commit to the winner (force native bool to prevent np.bool_ type issues)
+                    self._committed_left = bool(left_score >= right_score)
 
-                # Tangential force is orthogonal to radial force
+                # Apply the chosen swirl to ALL cones in range
                 if self._committed_left:
                     tx_tan, ty_tan = -uy, ux   # Swirl Left
                 else:
@@ -877,7 +890,7 @@ class VectorBlendedPlanner:
                 fwd_mask = ox[in_range] > 0
                 if np.any(fwd_mask):
                     min_fwd_dist = np.min(d[fwd_mask])
-                    obstacle_scale = max(0.3, min(1.0, min_fwd_dist / self.rep_range))
+                    obstacle_scale = max(0.4, min(1.0, min_fwd_dist / self.rep_range))
             else:
                 self._committed_left = None
         else:
