@@ -188,10 +188,6 @@ class SensorsMixin:
         angles = msg.angle_min + np.arange(len(msg.ranges)) * msg.angle_increment
         ranges = np.array(msg.ranges)
 
-        valid = np.isfinite(ranges) & (ranges > msg.range_min) & (ranges < msg.range_max)
-        angles = angles[valid]
-        ranges = ranges[valid]
-
         with self._lock:
             ct = math.cos(self._lidar_mount_theta_rad)
             st = math.sin(self._lidar_mount_theta_rad)
@@ -201,6 +197,13 @@ class SensorsMixin:
             r_max = self._lidar_range_max_mm
             fov_min = self._lidar_fov_min_rad
             fov_max = self._lidar_fov_max_rad
+
+        r_min_m = r_min / 1000.0
+        r_max_m = r_max / 1000.0
+        valid = np.isfinite(ranges) & (ranges >= r_min_m) & (ranges <= r_max_m)
+
+        angles = angles[valid]
+        ranges = ranges[valid]
 
         # Step 1 — polar → Cartesian in lidar sensor frame (metres → mm)
         lx = (ranges * np.cos(angles)) * 1000.0

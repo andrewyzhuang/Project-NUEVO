@@ -1033,7 +1033,7 @@ class NavigationMixin:
 
             obstacles_r = np.asarray(self._get_obstacles_mm())
 
-            # TEST 1: Is the LiDAR returning anything at all?
+            '''# TEST 1: Is the LiDAR returning anything at all?
             print(f"Detected {len(obstacles_r)} points") 
 
             if len(obstacles_r) > 0:
@@ -1041,7 +1041,7 @@ class NavigationMixin:
                 dists = np.sqrt(obstacles_r[:, 0]**2 + obstacles_r[:, 1]**2)
                 closest_idx = np.argmin(dists)
                 closest_x, closest_y = obstacles_r[closest_idx]
-                print(f"Closest point: X={closest_x:.0f}mm, Y={closest_y:.0f}mm at {dists[closest_idx]:.0f}mm away")
+                print(f"Closest point: X={closest_x:.0f}mm, Y={closest_y:.0f}mm at {dists[closest_idx]:.0f}mm away")'''
 
             linear_mm, angular_rad_s = planner.compute_velocity(
                 (x_mm, y_mm, theta_rad), remaining_path, obstacles_r, max_vel_mm

@@ -828,7 +828,7 @@ class VectorBlendedPlanner:
         # Weight the attractive vector so it can compete with repulsion.
         # Setting it to half the rep_gain means repulsion only overpowers 
         # the path tracking when the rover gets critically close to a cone.
-        attr_mag = self.rep_gain * 0.5
+        attr_mag = self.rep_gain * 2
         attr_vx = (lx_r / l_dist) * attr_mag if l_dist > 1e-6 else 0.0
         attr_vy = (ly_r / l_dist) * attr_mag if l_dist > 1e-6 else 0.0
 
@@ -877,7 +877,7 @@ class VectorBlendedPlanner:
                 fwd_mask = ox[in_range] > 0
                 if np.any(fwd_mask):
                     min_fwd_dist = np.min(d[fwd_mask])
-                    obstacle_scale = max(0.15, min(1.0, min_fwd_dist / self.rep_range))
+                    obstacle_scale = max(0.3, min(1.0, min_fwd_dist / self.rep_range))
             else:
                 self._committed_left = None
         else:
@@ -894,7 +894,7 @@ class VectorBlendedPlanner:
         angular = max(-self.w_max, min(self.w_max, angular))
 
         # Linear velocity: throttle down for sharp turns and forward obstacles
-        turn_slowdown = max(0.0, math.cos(steering_angle))
+        turn_slowdown = max(0.2, math.cos(steering_angle))
         linear = max_linear * turn_slowdown * obstacle_scale
 
         return float(linear), float(angular)
