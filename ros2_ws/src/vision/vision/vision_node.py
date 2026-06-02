@@ -22,6 +22,8 @@ from vision.rule_based_detection import (
 from vision.stop_sign import classify_stop_sign_visibility
 from vision.timing_utils import FixedRateScheduler
 from vision.traffic_light import classify_traffic_light_color
+from vision.stat_face_detection.face_detector import detect_person
+
 
 
 # User-facing COCO class filter.
@@ -232,7 +234,8 @@ class VisionNode(Node):
                         face_lighting_label, face_lighting_score = classify_person_face_lighting(person_crop)
                         detection.add_attribute("face_lighting", face_lighting_label, face_lighting_score)
                 
-                all_detections = yolo_detections + yellow_block_detections
+                person_detections, person_overlays = detect_person(frame)
+                all_detections = yolo_detections + yellow_block_detections + person_detections
 
                 message = self._build_detection_array_msg(
                     capture_stamp=capture_stamp,
@@ -244,7 +247,7 @@ class VisionNode(Node):
                 self._debug_writer.maybe_write(
                     frame_bgr=frame,
                     detected_objects=all_detections,
-                    debug_overlays=yellow_block_overlays,
+                    debug_overlays=yellow_block_overlays + person_overlays,
                 )
                 yolo_count = len(yolo_detections)
                 yellow_block_count = len(yellow_block_detections)
