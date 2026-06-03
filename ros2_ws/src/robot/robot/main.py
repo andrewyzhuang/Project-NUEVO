@@ -2,9 +2,12 @@ from __future__ import annotations
 import time
 
 from robot.robot import FirmwareState, Robot, Unit
-from robot.hardware_map import Button, DEFAULT_FSM_HZ, LED, Motor,POSITION_UNIT
+from robot.hardware_map import Button, DEFAULT_FSM_HZ, LED, Motor, POSITION_UNIT, ServoChannel
 from robot.util import densify_polyline
 from robot.path_planner import PurePursuitPlanner
+
+from robot.hardware_map import Button, DEFAULT_FSM_HZ, LED, Motor
+from robot.util import densify_polyline
 import math
 import numpy as np
 
@@ -28,6 +31,11 @@ LEFT_WHEEL_DIR_INVERTED = False
 RIGHT_WHEEL_MOTOR = Motor.DC_M2
 RIGHT_WHEEL_DIR_INVERTED = True
 
+# Servo 1 — gripper jaw
+GRIPPER_SERVO = ServoChannel.CH_1
+GRIPPER_OPEN_DEG = 15.0
+GRIPPER_CLOSE_DEG = 120.0
+GRIPPER_SETTLE_S = 1.0
 
 def configure_robot(robot: Robot) -> None:
     robot.set_unit(POSITION_UNIT)
@@ -42,6 +50,7 @@ def configure_robot(robot: Robot) -> None:
     )
     robot.set_tracked_tag_id(TAG_ID) # set aruco tag ID as the tracked tag for localization
     robot.enable_vision()
+    robot.enable_servo(GRIPPER_SERVO)
 
 
 def show_idle_leds(robot: Robot) -> None:
