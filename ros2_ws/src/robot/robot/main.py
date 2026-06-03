@@ -5,20 +5,13 @@ import time
 from robot.hardware_map import DEFAULT_FSM_HZ, LED, POSITION_UNIT
 from robot.robot import FirmwareState, Robot
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-
 LED_BRIGHTNESS = 255
 LIGHT_HOLD_SEC = 2.0
 
-# ---------------------------------------------------------------------------
-# Robot helpers
-# ---------------------------------------------------------------------------
 
 def configure_robot(robot: Robot) -> None:
     robot.set_unit(POSITION_UNIT)
-    robot.enable_vision()  # subscribe to /vision/detections
+    robot.enable_vision()
 
 
 def start_robot(robot: Robot) -> None:
@@ -33,29 +26,24 @@ def dim_all_leds(robot: Robot) -> None:
         robot.set_led(led, 0)
 
 
-def show_detected_ingredient_led(robot: Robot, ingredient: str) -> None:
-    if ingredient == "bun":
-        robot.set_led(LED.ORANGE, LED_BRIGHTNESS)
-        robot.set_led(LED.GREEN, 0)
-    elif ingredient == "patty":
+def show_person_led(robot: Robot, person: str) -> None:
+    if person == "person_1":
         robot.set_led(LED.GREEN, LED_BRIGHTNESS)
-        robot.set_led(LED.ORANGE, 0)
+        robot.set_led(LED.BLUE, 0)
+    elif person == "person_2":
+        robot.set_led(LED.BLUE, LED_BRIGHTNESS)
+        robot.set_led(LED.GREEN, 0)
 
 
-def scan_for_ingredients(robot: Robot) -> str | None:
+def scan_for_person(robot: Robot) -> str | None:
     detections = robot.get_detections()
     if not detections:
         return None
     for d in detections:
-        if d["class_name"] in ("bun", "yellow block"):
-            return "bun"
-        if d["class_name"] == "patty":
-            return "patty"
+        if d["class_name"] in ("person_1", "person_2"):
+            return d["class_name"]
     return None
 
-# ---------------------------------------------------------------------------
-# Main FSM
-# ---------------------------------------------------------------------------
 
 def run(robot: Robot) -> None:
     configure_robot(robot)
@@ -71,25 +59,25 @@ def run(robot: Robot) -> None:
         if state == "INIT":
             start_robot(robot)
             dim_all_leds(robot)
-            print("[FSM] WATCHING — place bun or patty in front of camera")
+            print("[FSM] WATCHING — show person 1 or 2 to camera")
             state = "WATCHING"
 
         elif state == "WATCHING":
             now = time.monotonic()
-            ingredient = scan_for_ingredients(robot)
+            person = scan_for_person(robot)
 
-            if ingredient in ("bun", "patty"):
-                show_detected_ingredient_led(robot, ingredient)
+            if person in ("person_1", "person_2"):
+                show_person_led(robot, person)
                 lights_off_at = now + LIGHT_HOLD_SEC
-                if ingredient != last_detected:
-                    print(f"[VISION] Detected: {ingredient}")
-                last_detected = ingredient
+                if person != last_detected:
+                    print(f"[VISION] Detected: {person}")
+                last_detected = person
 
             elif lights_off_at > 0.0 and now >= lights_off_at:
                 dim_all_leds(robot)
                 lights_off_at = 0.0
                 if last_detected is not None:
-                    print("[VISION] Removed — LEDs off")
+                    print("[VISION] Person left — LEDs off")
                 last_detected = None
 
         next_tick += period
