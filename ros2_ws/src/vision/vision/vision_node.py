@@ -21,6 +21,8 @@ from vision.rule_based_detection import (detect_yellow_block, detect_orange_patt
 from vision.stop_sign import classify_stop_sign_visibility
 from vision.timing_utils import FixedRateScheduler
 from vision.traffic_light import classify_traffic_light_color
+from vision.stat_face_detection.face_detector import classify_person_crop
+
 
 
 # User-facing COCO class filter.
@@ -207,6 +209,10 @@ class VisionNode(Node):
 
             capture_stamp = self.get_clock().now().to_msg()
             inference_start = time.monotonic()
+
+            extra_detections = []
+            extra_overlays = []
+
             try:
                 yolo_detections = self._infer_yolo_detections(frame)
                 yellow_block_detections, yellow_block_overlays = self._detect_yellow_block(frame)
@@ -232,23 +238,32 @@ class VisionNode(Node):
                         
                     elif detection.class_name == "person":
                         person_crop = object_crop
+                        # existing face lighting
                         face_lighting_label, face_lighting_score = classify_person_face_lighting(person_crop)
                         detection.add_attribute("face_lighting", face_lighting_label, face_lighting_score)
+                        # new identity matching
+                        identity_detection, identity_overlay = classify_person_crop(
+                            person_crop, detection.x, detection.y, detection.width, detection.height
+                            )
+                        if identity_detection is not None:
+                            extra_detections.append(identity_detection)
+                            extra_overlays.append(identity_overlay)
+                all_detections = (
+                    yolo_detections + yellow_block_detections + orange_block_detections + extra_detections
+                    )
                 
-                all_detections = yolo_detections + yellow_block_detections + orange_block_detections
 
                 message = self._build_detection_array_msg(
                     capture_stamp=capture_stamp,
                     image_width=frame.shape[1],
                     image_height=frame.shape[0],
                     detected_objects=all_detections,
-                    debug_overlays=yellow_block_overlays + orange_block_overlays, 
                 )
                 self._publisher.publish(message)
                 self._debug_writer.maybe_write(
                     frame_bgr=frame,
                     detected_objects=all_detections,
-                    debug_overlays=yellow_block_overlays,
+                    debug_overlays=yellow_block_overlays + orange_block_overlays + extra_overlays,
                 )
                 yolo_count = len(yolo_detections)
                 yellow_block_count = len(yellow_block_detections)
