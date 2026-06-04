@@ -1004,7 +1004,7 @@ class NavigationMixin:
         lookahead_mm: float,
         advance_radius_mm: float,
         tolerance_mm: float,
-        rep_range_mm: float,
+        default_rep_range_mm: float,
         rep_gain: float,
         max_angular: float,
         update_hz: float = float(DEFAULT_NAV_HZ), # Assuming this exists in your namespace
@@ -1014,7 +1014,6 @@ class NavigationMixin:
             lookahead_dist=lookahead_mm,
             max_angular=max_angular,
             repulsion_gain=rep_gain,
-            repulsion_range=rep_range_mm,
             goal_tolerance=tolerance_mm,
         )
         remaining_path = list(waypoints_mm)
@@ -1033,18 +1032,14 @@ class NavigationMixin:
 
             obstacles_r = np.asarray(self._get_obstacles_mm())
 
-            '''# TEST 1: Is the LiDAR returning anything at all?
-            print(f"Detected {len(obstacles_r)} points") 
-
-            if len(obstacles_r) > 0:
-                # TEST 2: Where does the robot think the closest point is?
-                dists = np.sqrt(obstacles_r[:, 0]**2 + obstacles_r[:, 1]**2)
-                closest_idx = np.argmin(dists)
-                closest_x, closest_y = obstacles_r[closest_idx]
-                print(f"Closest point: X={closest_x:.0f}mm, Y={closest_y:.0f}mm at {dists[closest_idx]:.0f}mm away")'''
+            current_target = remaining_path[0]
+            if len(current_target) >= 3:
+                current_rep_range = float(current_target[2])
+            else:
+                current_rep_range = default_rep_range_mm
 
             linear_mm, angular_rad_s = planner.compute_velocity(
-                (x_mm, y_mm, theta_rad), remaining_path, obstacles_r, max_vel_mm
+                (x_mm, y_mm, theta_rad), remaining_path, obstacles_r, max_vel_mm, current_rep_range
             )
             self._send_body_velocity_mm(linear_mm, angular_rad_s)
             if not self._sleep_with_cancel(dt):
@@ -1087,14 +1082,14 @@ class NavigationMixin:
 
     @staticmethod
     def _advance_remaining_path(
-        remaining_path: list[tuple[float, float]],
+        remaining_path: list[tuple],
         x_mm: float,
         y_mm: float,
         advance_radius_mm: float,
-    ) -> list[tuple[float, float]]:
+    ) -> list[tuple]:
         """Drop intermediate waypoints once within advance_radius; never drop the last."""
         while len(remaining_path) > 1:
-            next_x_mm, next_y_mm = remaining_path[0]
+            next_x_mm, next_y_mm = remaining_path[0][:2]
             if _dist2d(x_mm, y_mm, next_x_mm, next_y_mm) > advance_radius_mm:
                 break
             remaining_path.pop(0)

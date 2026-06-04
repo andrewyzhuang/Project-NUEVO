@@ -64,9 +64,15 @@ GPS_TANGENT_MIN_DISPLACEMENT_MM = 200.0
 # Path configuration
 # ---------------------------------------------------------------------------
 
+# (X, Y, repulsion_range_mm) TODO: tune x, y, and keep repulsion_range_mm constant
 PATH_CONTROL_POINTS = [
-    (0.0, 0.0),
-    (0.0, 2400.0)
+    (0.0, 0.0, 240.0),
+    (0.0, 2400.0, 240.0),
+    (600.0, 2400.0, 240.0),
+    (600.0, 0.0, 240.0),
+    (1500.0, 0.0, 240.0),
+    (1500.0, 2400.0, 450.0),
+    (2100.0, 2400.0, 240.0)
 ]
 
 VELOCITY_MM_S      = 150.0
@@ -76,7 +82,6 @@ ADVANCE_RADIUS_MM  = 100.0
 MAX_ANGULAR_RAD_S  = 0.8
 
 # Blending parameters
-REPULSION_RANGE_MM = 260.0
 REPULSION_GAIN     = 600.0
 
 STATUS_PRINT_INTERVAL_S = 0.5

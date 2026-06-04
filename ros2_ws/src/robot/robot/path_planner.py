@@ -785,13 +785,11 @@ class VectorBlendedPlanner:
         lookahead_dist: float = 150.0,
         max_angular: float = 2.0,
         repulsion_gain: float = 500.0,
-        repulsion_range: float = 400.0,
         goal_tolerance: float = 20.0,
     ) -> None:
         self.Ld = lookahead_dist
         self.w_max = max_angular
         self.rep_gain = repulsion_gain
-        self.rep_range = repulsion_range
         self.goal_tolerance = goal_tolerance
         
         # Tracks which side we committed to passing on to prevent oscillation
@@ -800,9 +798,10 @@ class VectorBlendedPlanner:
     def compute_velocity(
         self,
         pose: tuple[float, float, float],
-        waypoints: list[tuple[float, float]],
+        waypoints: list[tuple[float, float, float]],
         obstacles_r: np.ndarray,
         max_linear: float,
+        current_rep_range: float,
     ) -> tuple[float, float]:
         px, py, theta = pose
 
@@ -842,12 +841,12 @@ class VectorBlendedPlanner:
             oy = obstacles_r[:, 1]
             dists = np.maximum(np.sqrt(ox*ox + oy*oy), 1e-6)
 
-            in_range = dists < self.rep_range
+            in_range = dists < current_rep_range
             if np.any(in_range):
                 d = dists[in_range]
                 
                 # Smooth proximity scalar: 1.0 at impact, 0.0 at rep_range edge
-                proximity = 1.0 - (d / self.rep_range)
+                proximity = 1.0 - (d / current_rep_range)
                 mag = self.rep_gain * proximity * proximity
 
                 # Radial Repulsion (pushes directly away from cone)
@@ -890,7 +889,7 @@ class VectorBlendedPlanner:
                 fwd_mask = ox[in_range] > 0
                 if np.any(fwd_mask):
                     min_fwd_dist = np.min(d[fwd_mask])
-                    obstacle_scale = max(0.4, min(1.0, min_fwd_dist / self.rep_range))
+                    obstacle_scale = max(0.4, min(1.0, min_fwd_dist / current_rep_range))
             else:
                 self._committed_left = None
         else:
@@ -913,9 +912,10 @@ class VectorBlendedPlanner:
         return float(linear), float(angular)
 
     def _lookahead_point(
-        self, px: float, py: float, waypoints: list[tuple[float, float]]
+        self, px: float, py: float, waypoints: list[tuple]
     ) -> tuple[float, float]:
-        for wx, wy in waypoints:
+        for wp in waypoints:
+            wx, wy = wp[:2]
             if math.hypot(wx - px, wy - py) >= self.Ld:
                 return wx, wy
-        return waypoints[-1]
+        return waypoints[-1][:2]
