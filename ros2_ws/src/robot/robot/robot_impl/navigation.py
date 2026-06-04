@@ -698,7 +698,7 @@ class NavigationMixin:
 
     def vector_blended_follow_path(
         self,
-        waypoints: list[tuple[float, float]],
+        waypoints: list[tuple],
         velocity: float,
         lookahead: float,
         tolerance: float,
@@ -713,11 +713,23 @@ class NavigationMixin:
         if not waypoints:
             raise ValueError("waypoints must not be empty")
 
-        path_mm = [(float(x) * self._unit.value, float(y) * self._unit.value) for x, y in waypoints]
+        path_mm = []
+        for wp in waypoints:
+            x_mm = float(wp[0]) * self._unit.value
+            y_mm = float(wp[1]) * self._unit.value
+            
+            if len(wp) >= 3:
+                # If a custom repulsion range is scheduled, convert it too
+                sched_rep_mm = float(wp[2]) * self._unit.value
+                path_mm.append((x_mm, y_mm, sched_rep_mm))
+            else:
+                # Standard 2-item waypoint
+                path_mm.append((x_mm, y_mm))
+
         vel_mm = float(velocity) * self._unit.value
         lookahead_mm = float(lookahead) * self._unit.value
         tolerance_mm = float(tolerance) * self._unit.value
-        rep_range_mm = float(repulsion_range) * self._unit.value
+        default_rep_range_mm = float(repulsion_range) * self._unit.value
         advance_radius_mm = (
             tolerance_mm if advance_radius is None
             else float(advance_radius) * self._unit.value
@@ -728,7 +740,7 @@ class NavigationMixin:
         def target():
             self._nav_follow_vector_blended_path(
                 path_mm, vel_mm, lookahead_mm, advance_radius_mm, tolerance_mm,
-                rep_range_mm, rep_gain, max_angular
+                default_rep_range_mm, rep_gain, max_angular
             )
 
         return self._start_nav(target, blocking, timeout)
