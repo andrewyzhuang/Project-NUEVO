@@ -8,19 +8,15 @@ Hardware:
 Layout:
   Three pick points (P1, P2, P3) are arranged in a line.
   The robot starts facing toward the line (forward = toward the points).
-  All pick items sit on the SAME side of the line in world coordinates
-  (set WORLD_PICK_SIDE = "left" or "right" relative to the direction the
-  robot travels along the line when going from P1 → P3).
+  All picks use a hardcoded LEFT turn to face the item.
+  Assuming that the stepper starts at the top of the plate
 
 Pick order: P2 → P1 → P3
 
-Sequence per point:
-  1. Drive forward to the point
-  2. Turn 90° to face the pick item (direction computed from heading)
-  3. Move sideways offset toward item
-  4. Open gripper → lower platform → close gripper → raise platform
-  5. Move back to the line
-  6. Turn to face the next destination
+Sequence:
+  Start → forward to P2 → turn left → pick → turn right (revert) →
+  backward to P1 → turn left → pick → turn right (revert) →
+  forward to P3 → turn left → pick → turn right (revert) → done
 
 HOW TO RUN
 ----------
@@ -80,17 +76,12 @@ TURN_TOLERANCE_DEG   = 3.0          # degrees heading tolerance
 # --- Point geometry (set these to match your actual field) ---
 # Distance from start to P2 (first point visited)
 DIST_START_TO_P2_MM  = 1000.0       # mm — placeholder
-# Distance from P2 to P1 (robot reverses after P2 pick)
+# Distance from P2 backward to P1
 DIST_P2_TO_P1_MM     = 500.0        # mm — placeholder
-# Distance from P1 to P3 (robot drives forward past P2 to P3)
+# Distance from P1 forward to P3 (past P2 to the far end)
 DIST_P1_TO_P3_MM     = 1000.0       # mm — placeholder
-# How far to move sideways toward the pick item at each point
+# How far to move toward the pick item at each point
 PICK_SIDE_OFFSET_MM  = 150.0        # mm — placeholder
-
-# Which side of the travel line the pick items are on, in world coordinates.
-# "left"  = to the left  when travelling from P1 → P3
-# "right" = to the right when travelling from P1 → P3
-WORLD_PICK_SIDE = "left"
 
 
 # ---------------------------------------------------------------------------
@@ -132,49 +123,6 @@ def start_robot(robot: Robot) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Heading helpers
-# ---------------------------------------------------------------------------
-
-def get_heading_deg(robot: Robot) -> float:
-    """Return current odometry heading in degrees."""
-    _, _, theta = robot.get_odometry_pose()
-    return theta
-
-
-def pick_turn_deg(heading_deg: float) -> float:
-    """
-    Return the turn delta (degrees) needed so the robot faces the pick side.
-
-    WORLD_PICK_SIDE is defined relative to the P1→P3 travel direction.
-    When the robot is heading toward P3 (positive direction, ~0°) a left
-    pick side means turn +90°. When the robot is heading back toward P1
-    (~180°) the same world-left item is now on the robot's right, so we
-    turn -90°. The sign flips automatically from the dot-product logic below.
-    """
-    # Normalise heading to (-180, 180]
-    h = (heading_deg + 180.0) % 360.0 - 180.0
-
-    # "Forward along the line toward P3" is approximately 0° in our odometry
-    # frame (robot starts facing the line, drives straight to P2 first).
-    # Dot product of current heading with the P1→P3 direction tells us if the
-    # robot is broadly going forward (+) or backward (−) along the line.
-    import math
-    forward_component = math.cos(math.radians(h))   # +1 = facing P3, -1 = facing P1
-
-    if WORLD_PICK_SIDE == "left":
-        # Facing P3 → turn left (+90°); facing P1 → turn right (−90°)
-        return 90.0 if forward_component >= 0 else -90.0
-    else:
-        # Mirror
-        return -90.0 if forward_component >= 0 else 90.0
-
-
-def return_turn_deg(pick_turn: float) -> float:
-    """Opposite of the pick turn to face back along the line."""
-    return -pick_turn
-
-
-# ---------------------------------------------------------------------------
 # Manipulation primitives
 # ---------------------------------------------------------------------------
 
@@ -187,6 +135,24 @@ def lift_move(robot: Robot, steps: int) -> bool:
         blocking=True,
         timeout=LIFT_MOVE_TIMEOUT_S,
     )
+
+
+def raise_platform(robot: Robot) -> bool:
+    """Raise the lift to the top position from the bottom."""
+    robot.step_set_config(
+        LIFT_STEPPER,
+        max_velocity=LIFT_MAX_VELOCITY,
+        acceleration=LIFT_ACCELERATION,
+    )
+    robot.step_enable(LIFT_STEPPER)
+    print("[MANIP] raise platform")
+    ok = lift_move(robot, LIFT_UP_STEPS)
+    if not ok:
+        print("[warn] lift failed to raise")
+        robot.step_disable(LIFT_STEPPER)
+        return False
+    robot.step_disable(LIFT_STEPPER)
+    return True
 
 
 def perform_pick(robot: Robot) -> bool:
@@ -230,75 +196,36 @@ def perform_pick(robot: Robot) -> bool:
     return True
 
 
-def raise_platform(robot: Robot) -> bool:
-    """Raise the lift to the top position from the bottom."""
-    robot.step_set_config(
-        LIFT_STEPPER,
-        max_velocity=LIFT_MAX_VELOCITY,
-        acceleration=LIFT_ACCELERATION,
-    )
-    robot.step_enable(LIFT_STEPPER)
-    print("[MANIP] raise platform (pre-pick)")
-    ok = lift_move(robot, LIFT_UP_STEPS)
-    if not ok:
-        print("[warn] lift failed to raise in pre-pick")
-        robot.step_disable(LIFT_STEPPER)
-        return False
-    robot.step_disable(LIFT_STEPPER)
-    return True
-
-
 # ---------------------------------------------------------------------------
-# Per-point pick routine
+# Per-point pick routine — always turns left
 # ---------------------------------------------------------------------------
 
-def pick_at_point(robot: Robot, label: str, approach_dist_mm: float) -> bool:
+def pick_at_point(robot: Robot, label: str) -> bool:
     """
-    Drive to a pick point, perform the pick, and stop ready for the next move.
+    At the current position:
+      1. Raise platform
+      2. Turn left 90°
+      3. Move forward PICK_SIDE_OFFSET_MM toward item
+      4. Perform pick (open → lower → close → raise)
+      5. Move backward PICK_SIDE_OFFSET_MM back to line
+      6. Turn right 90° (revert left turn)
 
-    approach_dist_mm : distance to drive forward to reach the point.
-                       Pass a negative value to drive backward.
+    The robot must already be positioned at the point and facing
+    along the line before this is called.
 
-    Returns False on any motion or actuator failure.
+    Returns False on any failure.
     """
-    print(f"[MOTION] drive to {label}  ({approach_dist_mm:+.0f} mm)")
 
-    if approach_dist_mm >= 0:
-        ok = robot.move_forward(
-            distance=approach_dist_mm,
-            velocity=DRIVE_VELOCITY_MM_S,
-            tolerance=DRIVE_TOLERANCE_MM,
-            blocking=True,
-        )
-    else:
-        ok = robot.move_backward(
-            distance=abs(approach_dist_mm),
-            velocity=DRIVE_VELOCITY_MM_S,
-            tolerance=DRIVE_TOLERANCE_MM,
-            blocking=True,
-        )
-
-    if not ok:
-        print(f"[warn] drive to {label} failed")
-        robot.stop()
-        return False
-
-    # Raise platform before turning so the gripper clears the floor
-    if not raise_platform(robot):
-        return False
-
-    # Turn to face the pick item
-    heading  = get_heading_deg(robot)
-    turn_deg = pick_turn_deg(heading)
-    print(f"[MOTION] turn {turn_deg:+.0f}° to face pick side (heading was {heading:.1f}°)")
+    # Always turn left to face the pick item
+    print(f"[MOTION] {label} — turn left 90°")
     robot.turn_by(
-        delta_deg=turn_deg,
+        delta_deg=90.0,
         blocking=True,
         tolerance_deg=TURN_TOLERANCE_DEG,
     )
 
     # Nudge toward the item
-    print(f"[MOTION] move {PICK_SIDE_OFFSET_MM:.0f} mm toward item")
+    print(f"[MOTION] {label} — move {PICK_SIDE_OFFSET_MM:.0f} mm toward item")
     robot.move_forward(
         distance=PICK_SIDE_OFFSET_MM,
         velocity=DRIVE_VELOCITY_MM_S,
@@ -306,12 +233,12 @@ def pick_at_point(robot: Robot, label: str, approach_dist_mm: float) -> bool:
         blocking=True,
     )
 
-    # Perform the manipulation (open → lower → close → raise)
+    # Perform the manipulation
     if not perform_pick(robot):
         return False
 
     # Back up to the line
-    print(f"[MOTION] return {PICK_SIDE_OFFSET_MM:.0f} mm to line")
+    print(f"[MOTION] {label} — return {PICK_SIDE_OFFSET_MM:.0f} mm to line")
     robot.move_backward(
         distance=PICK_SIDE_OFFSET_MM,
         velocity=DRIVE_VELOCITY_MM_S,
@@ -319,11 +246,10 @@ def pick_at_point(robot: Robot, label: str, approach_dist_mm: float) -> bool:
         blocking=True,
     )
 
-    # Turn back to face along the line
-    ret_turn = return_turn_deg(turn_deg)
-    print(f"[MOTION] turn {ret_turn:+.0f}° to face along line")
+    # Revert the left turn (turn right 90°) to face along the line again
+    print(f"[MOTION] {label} — turn right 90° (revert)")
     robot.turn_by(
-        delta_deg=ret_turn,
+        delta_deg=-90.0,
         blocking=True,
         tolerance_deg=TURN_TOLERANCE_DEG,
     )
@@ -338,41 +264,79 @@ def pick_at_point(robot: Robot, label: str, approach_dist_mm: float) -> bool:
 
 def run_full_sequence(robot: Robot) -> bool:
     """
-    Execute picks at P2, P1, then P3 in that order.
+    Travel path:
 
-    Travel path (odometry frame, robot starts at origin facing +X):
+      Start
+        │  forward DIST_START_TO_P2_MM
+        ▼
+       P2  ← pick (turn left, revert)
+        │  backward DIST_P2_TO_P1_MM
+        ▼
+       P1  ← pick (turn left, revert)
+        │  forward DIST_P1_TO_P3_MM
+        ▼
+       P3  ← pick (turn left, revert)
 
-      Start ──(forward DIST_START_TO_P2)──► P2
-             ──(backward DIST_P2_TO_P1)──► P1
-             ──(forward DIST_P1_TO_P3)───► P3
+    After each pick the robot is facing along the line in the same
+    direction it arrived, ready for the next drive leg.
 
-    After each pick the robot is re-oriented along the line in the
-    direction needed for the next leg.
+    NOTE: after the P1 pick the robot is still facing toward P1
+    (it arrived backward). A 180° turn is needed before driving
+    forward to P3.
     """
 
-    # ---- Pick P2 (first stop, drive forward from start) --------------------
-    if not pick_at_point(robot, "P2", DIST_START_TO_P2_MM):
-        return False
-
-    # After returning from P2 pick the robot faces toward P3 (forward).
-    # We need to go to P1 which is behind us — turn 180° then drive forward,
-    # or simply drive backward. Driving backward keeps heading consistent.
-    # ---- Pick P1 (behind P2, so drive backward) ----------------------------
-    if not pick_at_point(robot, "P1", -DIST_P2_TO_P1_MM):
-        return False
-
-    # After P1 pick the robot faces toward P1 (backward direction, ~180°).
-    # P3 is in the forward direction (toward P3 from P1 = full length).
-    # Turn 180° to face P3, then drive forward.
-    print("[MOTION] turn 180° to face P3")
-    robot.turn_by(
-        delta_deg=180.0,
+    # ---- Drive to P2 and pick ----------------------------------------------
+    print("[MOTION] drive forward to P2")
+    if not robot.move_forward(
+        distance=DIST_START_TO_P2_MM,
+        velocity=DRIVE_VELOCITY_MM_S,
+        tolerance=DRIVE_TOLERANCE_MM,
         blocking=True,
-        tolerance_deg=TURN_TOLERANCE_DEG,
-    )
+    ):
+        print("[warn] drive to P2 failed")
+        robot.stop()
+        return False
+    
+    # remove this comment when traffic light height is determined
+    #if not raise_platform(robot):
+    #    return False
 
-    # ---- Pick P3 (far end, drive forward from P1) --------------------------
-    if not pick_at_point(robot, "P3", DIST_P1_TO_P3_MM):
+    if not pick_at_point(robot, "P2"):
+        return False
+
+    # ---- Drive backward to P1 and pick -------------------------------------
+    # After the P2 pick the robot faces toward P3 (the direction it arrived).
+    # Drive backward to reach P1.
+    print("[MOTION] drive backward to P1")
+    if not robot.move_backward(
+        distance=DIST_P2_TO_P1_MM,
+        velocity=DRIVE_VELOCITY_MM_S,
+        tolerance=DRIVE_TOLERANCE_MM,
+        blocking=True,
+    ):
+        print("[warn] drive to P1 failed")
+        robot.stop()
+        return False
+
+    if not pick_at_point(robot, "P1"):
+        return False
+
+    # ---- Turn 180° to face P3 then drive forward ---------------------------
+    # After the P1 pick the robot is still facing toward P3 (same heading as
+    # after P2 pick, since pick_at_point always restores the heading).
+    # P1 is behind the robot so we just drive forward toward P3.
+    print("[MOTION] drive forward to P3")
+    if not robot.move_forward(
+        distance=DIST_P1_TO_P3_MM,
+        velocity=DRIVE_VELOCITY_MM_S,
+        tolerance=DRIVE_TOLERANCE_MM,
+        blocking=True,
+    ):
+        print("[warn] drive to P3 failed")
+        robot.stop()
+        return False
+
+    if not pick_at_point(robot, "P3"):
         return False
 
     robot.stop()
@@ -399,10 +363,9 @@ def run(robot: Robot) -> None:
                 print("[warn] odometry reset not confirmed; continuing")
                 robot.wait_for_pose_update(timeout=0.5)
             show_idle_leds(robot)
-            print("[FSM] IDLE — manually lower the platform to its bottom position")
+            print("[FSM] IDLE — assuming gripper plate at top")
             print("            then press BTN_1 to start the pick sequence")
-            print(f"[CFG] pick order: P2 → P1 → P3")
-            print(f"[CFG] pick side (world): {WORLD_PICK_SIDE}")
+            print(f"[CFG] pick order: P2 → P1 → P3  (always turn left to pick)")
             print(f"[CFG] side offset: {PICK_SIDE_OFFSET_MM:.0f} mm")
             print(f"[CFG] distances: start→P2={DIST_START_TO_P2_MM:.0f} mm  "
                   f"P2→P1={DIST_P2_TO_P1_MM:.0f} mm  P1→P3={DIST_P1_TO_P3_MM:.0f} mm")
@@ -425,11 +388,9 @@ def run(robot: Robot) -> None:
             show_idle_leds(robot)
             if ok:
                 print("[FSM] SEQUENCE COMPLETE — press BTN_1 to run again")
-                print("      (manually lower the platform before re-running)")
+                print(" ")
                 state = "IDLE"
             else:
-                # Return to INIT so the operator must manually re-home the
-                # platform before the next attempt
                 print("[FSM] SEQUENCE FAILED — manually lower the platform,")
                 print("      then the robot will return to IDLE")
                 state = "INIT"
