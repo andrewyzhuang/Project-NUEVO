@@ -20,7 +20,7 @@ Sequence:
 
 HOW TO RUN
 ----------
-    cp assembly.py main.py
+    cp ros2_ws/src/robot/robot/assembly.py main.py
     ros2 run robot robot
 
 Press BTN_1 to start. Manually lower the platform to its bottom before
