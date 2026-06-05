@@ -62,8 +62,8 @@ GRIPPER_SETTLE_S    = 1.0           # seconds to wait after each servo move
 
 # --- Lift (Stepper 1) ---
 LIFT_STEPPER        = Stepper.STEPPER_1
-LIFT_UP_STEPS       = 2100          # steps from bottom to top
-PICK_LIFT_STEPS     = 1200          # moves from bottom between picks
+LIFT_UP_STEPS       = 2100          # steps from table to top
+PICK_LIFT_STEPS     = 1200          # steps from table to top of buger (arbitrary height above buger)
 INIT_LOWER_STEPS    = int(PICK_LIFT_STEPS - LIFT_UP_STEPS)
 LIFT_MAX_VELOCITY   = 800           # steps/s
 LIFT_ACCELERATION   = 400           # steps/s²
