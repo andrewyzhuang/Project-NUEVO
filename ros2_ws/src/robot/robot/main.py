@@ -56,27 +56,27 @@ from robot.robot import FirmwareState, Robot
 
 # --- Gripper (Servo 1) ---
 GRIPPER_SERVO       = ServoChannel.CH_1
-GRIPPER_OPEN_DEG    = 60          # degrees — jaw open
-GRIPPER_CLOSE_DEG   = 170.0         # degrees — jaw closed
+GRIPPER_OPEN_DEG    = 60         # degrees — jaw open
+GRIPPER_CLOSE_DEG   = 160.0         # degrees — jaw closed (prev:170)
 GRIPPER_SETTLE_S    = 1.0           # seconds to wait after each servo move
 
 # --- Lift (Stepper 1) ---
 LIFT_STEPPER        = Stepper.STEPPER_1
-LIFT_UP_STEPS       = 2100          # steps from table to top
-PICK_LIFT_STEPS     = 1200          # steps from table to top of buger (arbitrary height above buger)
+LIFT_UP_STEPS       = 2475          # steps from table to top (prev:2100)
+PICK_LIFT_STEPS     = 1875          # steps from table to top of buger (arbitrary height above buger)(prev 1200)
 INIT_LOWER_STEPS    = int(PICK_LIFT_STEPS - LIFT_UP_STEPS)
 LIFT_MAX_VELOCITY   = 800           # steps/s
 LIFT_ACCELERATION   = 400           # steps/s²
 LIFT_MOVE_TIMEOUT_S = 10.0          # max seconds per lift move
 
 # --- Drive ---
-DRIVE_VELOCITY_MM_S  = 100.0        # mm/s for all forward/backward moves
+DRIVE_VELOCITY_MM_S  = 75.0        # mm/s for all forward/backward moves (prev 100)
 DRIVE_TOLERANCE_MM   = 20.0         # mm position tolerance
 TURN_TOLERANCE_DEG   = 3.0          # degrees heading tolerance
 
 # --- Point geometry (set these to match your actual field) ---
 # Distance from start to P1 (first point visited)
-DIST_START_TO_P1_MM  = 950       # mm — placeholder
+DIST_START_TO_P1_MM  = 1150       # mm — placeholder (prev 950)
 # Distance from P1 forward to P2
 DIST_P1_TO_P2_MM     = 150.0        # mm — placeholder
 # Distance from P2 forward to P3
@@ -350,6 +350,9 @@ def run_full_sequence(robot: Robot, cancel: CancelFlag) -> bool:
     if not pick_at_point(robot, "P3", cancel):
         return False
 
+    robot.step_set_config(
+       
+    )
     robot.stop()
     return True
 
