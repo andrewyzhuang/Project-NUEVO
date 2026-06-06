@@ -75,8 +75,8 @@ from robot.robot import FirmwareState, Robot
 
 # --- Gripper (Servo 1) ---
 GRIPPER_SERVO       = ServoChannel.CH_1
-GRIPPER_OPEN_DEG    = 60            # degrees — jaw open
-GRIPPER_CLOSE_DEG   = 160.0         # degrees — jaw closed (prev: 170)
+GRIPPER_OPEN_DEG    = 135.0            # degrees — jaw open (prev: 60)
+GRIPPER_CLOSE_DEG   = 167.0         # degrees — jaw closed (prev: 170)
 GRIPPER_SETTLE_S    = 1.0           # seconds to wait after each servo move
 
 # --- Lift (Stepper 1) ---
@@ -92,18 +92,18 @@ HEIGHT_1_STEPS = 0       # starting position — top of lift travel
 HEIGHT_2_STEPS = 2475    # table/platform surface level (prev: 2100)
 HEIGHT_3_STEPS = 1875    # one patty height above table (prev: 1200)
 HEIGHT_4_STEPS = 1875    # one bun height above table — set to match your build
-HEIGHT_5_STEPS = 2000    # clearance height — slightly above HEIGHT_4
+HEIGHT_5_STEPS = 1700    # clearance height — slightly above HEIGHT_4
 
 # --- Drive ---
-DRIVE_VELOCITY_MM_S  = 75.0         # mm/s for all forward/backward moves (prev: 100)
+DRIVE_VELOCITY_MM_S  = 90.0         # mm/s for all forward/backward moves (prev: 100)
 DRIVE_TOLERANCE_MM   = 20.0         # mm position tolerance
-TURN_TOLERANCE_DEG   = 3.0          # degrees heading tolerance
+TURN_TOLERANCE_DEG   = 2.0          # degrees heading tolerance
 
 # --- Point geometry (set these to match your actual field) ---
-DIST_START_TO_P1_MM  = 1150.0       # distance from start to P1 (prev: 950)
+DIST_START_TO_P1_MM  = 1125.0       # distance from start to P1 (prev: 950)
 DIST_P1_TO_P2_MM     = 150.0        # distance from P1 to P2
 DIST_P2_TO_P3_MM     = 150.0        # distance from P2 to P3
-PICK_SIDE_OFFSET_MM  = 50.0          # distance to step toward item before picking
+PICK_SIDE_OFFSET_MM  = 60.0          # distance to step toward item before picking
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +197,7 @@ def lift_to_height(robot: Robot, from_steps: int, to_steps: int) -> bool:
         return True
     direction = "down" if delta > 0 else "up"
     print(f"[MANIP] move platform {direction} by {abs(delta)} steps")
-    return lift_move(robot, delta)
+    return lift_move(robot, -delta)
 
 
 # ---------------------------------------------------------------------------
@@ -267,7 +267,7 @@ def pick_p1(robot: Robot, cancel: CancelFlag, current_height: int) -> tuple[bool
     current_height = HEIGHT_5_STEPS
 
     robot.step_disable(LIFT_STEPPER)
-    robot.disable_servo(GRIPPER_SERVO)
+#    robot.disable_servo(GRIPPER_SERVO)
 
     if cancel.is_set():
         return False, current_height
@@ -363,7 +363,7 @@ def pick_p2(robot: Robot, cancel: CancelFlag, current_height: int) -> tuple[bool
     current_height = HEIGHT_5_STEPS
 
     robot.step_disable(LIFT_STEPPER)
-    robot.disable_servo(GRIPPER_SERVO)
+#    robot.disable_servo(GRIPPER_SERVO)
 
     if cancel.is_set():
         return False, current_height
@@ -459,7 +459,7 @@ def pick_p3(robot: Robot, cancel: CancelFlag, current_height: int) -> tuple[bool
     current_height = HEIGHT_5_STEPS
 
     robot.step_disable(LIFT_STEPPER)
-    robot.disable_servo(GRIPPER_SERVO)
+#    robot.disable_servo(GRIPPER_SERVO)
 
     if cancel.is_set():
         return False, current_height
