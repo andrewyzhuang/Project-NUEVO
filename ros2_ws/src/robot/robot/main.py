@@ -1,18 +1,53 @@
 """
-pp_blended.py — FSM-based vector-blended pure-pursuit path following
-====================================================================
-Copy this file over main.py, then restart the robot node:
+=================================================================
+Hardware:
+  - Stepper 1  : vertical lift (no limit switch, platform starts at top)
+  - Servo 1    : gripper jaw
 
-    cp ros2_ws/src/robot/robot/examples/pp_blended.py ros2_ws/src/robot/robot/main.py
+Layout:
+  Three pick points (P1, P2, P3) are arranged in a line.
+  The robot starts facing toward the line (forward = toward the points).
+  All picks use a hardcoded LEFT turn to face the item.
+  Platform starts at the top (HEIGHT_1) and descends to pick.
+
+Platform heights (all measured as steps down from HEIGHT_1):
+  HEIGHT_1 : starting position — top of platform lift
+  HEIGHT_2 : table/platform surface level
+  HEIGHT_3 : height of one patty on the table/platform
+  HEIGHT_4 : height of one bun on the table/platform
+  HEIGHT_5 : clearance height — slightly above HEIGHT_4
+
+Pick order: P1 → P2 → P3
+
+Sequence per point:
+  P1: forward → turn left → step forward → open gripper →
+      lower to HEIGHT_2 → close gripper → raise to HEIGHT_5 →
+      step back → turn right
+
+  P2: forward → turn left → step forward →
+      lower to HEIGHT_3 → open gripper → lower to HEIGHT_2 →
+      close gripper → raise to HEIGHT_5 →
+      step back → turn right
+
+  P3: forward → turn left → step forward →
+      lower to HEIGHT_4 → open gripper → lower to HEIGHT_2 →
+      close gripper → raise to HEIGHT_5 →
+      step back → turn right
+
+  End: raise platform back to HEIGHT_1
+
+HOW TO RUN
+----------
+    cp assembly.py main.py
     ros2 run robot robot
 
-BTN_1 starts the path. BTN_2 cancels and returns to IDLE.
-This example uses the vector-blended algorithm which adds a repulsive
-vector from detected lidar obstacles to the pure-pursuit steering vector.
+Press BTN_1 to start. On any actuator failure the robot stops and returns
+to INIT. BTN_2 immediately terminates the program at any point.
 """
 
 from __future__ import annotations
 
+import sys
 import time
 
 from robot.hardware_map import (
@@ -20,76 +55,74 @@ from robot.hardware_map import (
     DEFAULT_FSM_HZ,
     LED,
     INITIAL_THETA_DEG,
-    LIDAR_FOV_DEG,
-    LIDAR_MOUNT_THETA_DEG,
-    LIDAR_MOUNT_X_MM,
-    LIDAR_MOUNT_Y_MM,
-    LIDAR_RANGE_MAX_MM,
-    LIDAR_RANGE_MIN_MM,
     LEFT_WHEEL_DIR_INVERTED,
     LEFT_WHEEL_MOTOR,
     POSITION_UNIT,
     RIGHT_WHEEL_DIR_INVERTED,
     RIGHT_WHEEL_MOTOR,
-    TAG_BODY_OFFSET_X_MM,
-    TAG_BODY_OFFSET_Y_MM,
+    ServoChannel,
+    StepMoveType,
+    Stepper,
     WHEEL_BASE,
     WHEEL_DIAMETER,
 )
 from robot.robot import FirmwareState, Robot
-from robot.util import densify_polyline  # noqa: F401 - optional helper for students
 
 
 # ---------------------------------------------------------------------------
-# Sensor toggles — set True if the corresponding node is running
+# Tunable constants — fill these in for your build
 # ---------------------------------------------------------------------------
 
-ENABLE_LIDAR = True   # Blended algorithm requires LIDAR for obstacle avoidance
-ENABLE_GPS   = False
+# --- Gripper (Servo 1) ---
+GRIPPER_SERVO       = ServoChannel.CH_1
+GRIPPER_OPEN_DEG    = 135.0            # degrees — jaw open (prev: 60)
+GRIPPER_CLOSE_DEG   = 167.0         # degrees — jaw closed (prev: 170)
+GRIPPER_SETTLE_S    = 1.0           # seconds to wait after each servo move
 
-TAG_ID = -1  # set to the ArUco marker ID on your robot
+# --- Lift (Stepper 1) ---
+# All heights are defined as steps DOWN from HEIGHT_1 (top/start position).
+# Positive step values = downward movement from starting position.
+LIFT_STEPPER        = Stepper.STEPPER_1
+LIFT_MAX_VELOCITY   = 800           # steps/s
+LIFT_ACCELERATION   = 400           # steps/s²
+LIFT_MOVE_TIMEOUT_S = 10.0          # max seconds per lift move
+
+# Platform height definitions (steps below HEIGHT_1)
+HEIGHT_1_STEPS = 0       # starting position — top of lift travel
+HEIGHT_2_STEPS = 2475    # table/platform surface level (prev: 2100)
+HEIGHT_3_STEPS = 1875    # one patty height above table (prev: 1200)
+HEIGHT_4_STEPS = 1875    # one bun height above table — set to match your build
+HEIGHT_5_STEPS = 1700    # clearance height — slightly above HEIGHT_4
+
+# --- Drive ---
+DRIVE_VELOCITY_MM_S  = 90.0         # mm/s for all forward/backward moves (prev: 100)
+DRIVE_TOLERANCE_MM   = 20.0         # mm position tolerance
+TURN_TOLERANCE_DEG   = 2.0          # degrees heading tolerance
+
+# --- Point geometry (set these to match your actual field) ---
+DIST_START_TO_P1_MM  = 1125.0       # distance from start to P1 (prev: 950)
+DIST_P1_TO_P2_MM     = 150.0        # distance from P1 to P2
+DIST_P2_TO_P3_MM     = 150.0        # distance from P2 to P3
+PICK_SIDE_OFFSET_MM  = 60.0          # distance to step toward item before picking
 
 
 # ---------------------------------------------------------------------------
-# GPS tuning (only used when ENABLE_GPS = True)
+# LED helpers
 # ---------------------------------------------------------------------------
 
-GPS_POSITION_ALPHA           = 0.10
-ENABLE_GPS_TANGENT_HEADING   = False
-GPS_TANGENT_ALPHA            = 0.15
-GPS_TANGENT_MIN_DISPLACEMENT_MM = 200.0
+def show_idle_leds(robot: Robot) -> None:
+    robot.set_led(LED.ORANGE, 200)
+    robot.set_led(LED.GREEN, 0)
+
+
+def show_running_leds(robot: Robot) -> None:
+    robot.set_led(LED.ORANGE, 0)
+    robot.set_led(LED.GREEN, 200)
 
 
 # ---------------------------------------------------------------------------
-# Path configuration
+# Robot startup
 # ---------------------------------------------------------------------------
-
-init_x = 0.0
-init_y = 0.0
-
-# (X, Y, repulsion_range_mm) TODO: tune x, y, and keep repulsion_range_mm constant
-PATH_CONTROL_POINTS = [
-    (init_x, init_y, 240.0),
-    (0.0, 2150.0, 240.0),
-    (530.0, 2150.0, 160.0),
-    (530.0, -550.0, 240.0),
-    (1300.0, -550.0, 240.0),
-    (1300.0, 2100.0, 360.0),
-    (1500.0, 2100.0, 240.0)
-]
-
-VELOCITY_MM_S      = 150.0
-LOOKAHEAD_MM       = 150.0
-TOLERANCE_MM       = 25.0
-ADVANCE_RADIUS_MM  = 100.0
-MAX_ANGULAR_RAD_S  = 0.6
-
-# Blending parameters
-REPULSION_RANGE_MM = 450.0
-REPULSION_GAIN     = 600.0
-
-STATUS_PRINT_INTERVAL_S = 0.5
-
 
 def configure_robot(robot: Robot) -> None:
     robot.set_unit(POSITION_UNIT)
@@ -103,28 +136,6 @@ def configure_robot(robot: Robot) -> None:
         right_motor_dir_inverted=RIGHT_WHEEL_DIR_INVERTED,
     )
 
-    if ENABLE_LIDAR:
-        robot.enable_lidar()
-        robot.set_lidar_mount(
-            x_mm=LIDAR_MOUNT_X_MM,
-            y_mm=LIDAR_MOUNT_Y_MM,
-            theta_deg=LIDAR_MOUNT_THETA_DEG,
-        )
-        robot.set_lidar_filter(
-            range_min_mm=LIDAR_RANGE_MIN_MM,
-            range_max_mm=LIDAR_RANGE_MAX_MM,
-            fov_deg=LIDAR_FOV_DEG,
-        )
-        robot.start_lidar_world_publisher()
-        print("[sensor] lidar enabled — subscribing to /scan")
-
-    if ENABLE_GPS:
-        robot.enable_gps()
-        robot.set_tracked_tag_id(TAG_ID)
-        robot.set_tag_body_offset(TAG_BODY_OFFSET_X_MM, TAG_BODY_OFFSET_Y_MM)
-        robot.set_position_fusion_alpha(GPS_POSITION_ALPHA)
-        print(f"[sensor] GPS enabled — tracking ArUco tag {TAG_ID}")
-
 
 def start_robot(robot: Robot) -> None:
     current = robot.get_state()
@@ -133,125 +144,518 @@ def start_robot(robot: Robot) -> None:
     robot.set_state(FirmwareState.RUNNING)
 
 
-def reset_mission_pose(robot: Robot) -> None:
-    robot.reset_odometry()
-    if not robot.wait_for_odometry_reset(timeout=2.0):
-        print("[warn] odometry reset not confirmed within 2.0s; continuing with latest pose")
-        robot.wait_for_pose_update(timeout=0.5)
+# ---------------------------------------------------------------------------
+# Cancel flag
+# ---------------------------------------------------------------------------
+
+class CancelFlag:
+    """Simple wrapper so functions can signal and check for cancellation."""
+    def __init__(self) -> None:
+        self.cancelled = False
+
+    def cancel(self) -> None:
+        self.cancelled = True
+
+    def is_set(self) -> bool:
+        return self.cancelled
 
 
-def show_idle_leds(robot: Robot) -> None:
-    robot.set_led(LED.ORANGE, 200)
-    robot.set_led(LED.GREEN, 0)
+# ---------------------------------------------------------------------------
+# Lift primitives
+# ---------------------------------------------------------------------------
 
-
-def show_moving_leds(robot: Robot) -> None:
-    robot.set_led(LED.ORANGE, 0)
-    robot.set_led(LED.GREEN, 200)
-
-
-def print_status(robot: Robot) -> None:
-    ox, oy, otheta = robot.get_odometry_pose()
-    if ENABLE_GPS and robot.has_fused_pose():
-        fx, fy, ftheta = robot.get_fused_pose()
-        print(
-            f"  odom=({ox:6.0f}, {oy:6.0f}) mm  θ_odom={otheta:5.1f}°  |  "
-            f"fused=({fx:6.0f}, {fy:6.0f}) mm  θ_fused={ftheta:5.1f}°  "
-            f"gps={'fresh' if robot.is_gps_active() else 'stale'}"
-        )
-    else:
-        print(f"  odom=({ox:6.0f}, {oy:6.0f}) mm  θ={otheta:5.1f}°")
-
-
-def start_path(robot: Robot):
-    return robot.vector_blended_follow_path(
-        waypoints=PATH_CONTROL_POINTS,
-        velocity=VELOCITY_MM_S,
-        lookahead=LOOKAHEAD_MM,
-        tolerance=TOLERANCE_MM,
-        repulsion_range=REPULSION_RANGE_MM,
-        repulsion_gain=REPULSION_GAIN,
-        advance_radius=ADVANCE_RADIUS_MM,
-        max_angular_rad_s=MAX_ANGULAR_RAD_S,
-        blocking=False,
+def lift_move(robot: Robot, steps: int) -> bool:
+    """Move the lift by `steps` relative to current position.
+    Positive = downward, negative = upward."""
+    return robot.step_move(
+        LIFT_STEPPER,
+        steps=steps,
+        move_type=StepMoveType.RELATIVE,
+        blocking=True,
+        timeout=LIFT_MOVE_TIMEOUT_S,
     )
 
+
+def lift_enable(robot: Robot) -> None:
+    """Configure and enable the lift stepper."""
+    robot.step_set_config(
+        LIFT_STEPPER,
+        max_velocity=LIFT_MAX_VELOCITY,
+        acceleration=LIFT_ACCELERATION,
+    )
+    robot.step_enable(LIFT_STEPPER)
+
+
+def lift_to_height(robot: Robot, from_steps: int, to_steps: int) -> bool:
+    """
+    Move the platform from one absolute height (in steps below HEIGHT_1)
+    to another. Positive delta = downward, negative delta = upward.
+    Returns False on failure.
+    """
+    delta = to_steps - from_steps
+    if delta == 0:
+        return True
+    direction = "down" if delta > 0 else "up"
+    print(f"[MANIP] move platform {direction} by {abs(delta)} steps")
+    return lift_move(robot, -delta)
+
+
+# ---------------------------------------------------------------------------
+# Per-point pick routines
+# ---------------------------------------------------------------------------
+
+def pick_p1(robot: Robot, cancel: CancelFlag, current_height: int) -> tuple[bool, int]:
+    """
+    P1 pick — platform is already at HEIGHT_5 (clearance) on entry.
+
+    Sequence:
+      Turn left 90° → step forward → open gripper →
+      lower to HEIGHT_2 (table surface) → close gripper →
+      raise to HEIGHT_5 (clearance) → step back → turn right 90°
+
+    Returns (success, new_current_height_steps).
+    """
+    label = "P1"
+
+    if cancel.is_set():
+        return False, current_height
+
+    print(f"[MOTION] {label} — turn left 90°")
+    robot.turn_by(delta_deg=90.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
+
+    if cancel.is_set():
+        return False, current_height
+
+    print(f"[MOTION] {label} — step {PICK_SIDE_OFFSET_MM:.0f} mm toward item")
+    robot.move_forward(
+        distance=PICK_SIDE_OFFSET_MM,
+        velocity=DRIVE_VELOCITY_MM_S,
+        tolerance=DRIVE_TOLERANCE_MM,
+        blocking=True,
+    )
+
+    if cancel.is_set():
+        return False, current_height
+
+    # Open gripper at clearance height before descending
+    robot.enable_servo(GRIPPER_SERVO)
+    print(f"[MANIP] {label} — open gripper")
+    robot.set_servo(GRIPPER_SERVO, GRIPPER_OPEN_DEG)
+    time.sleep(GRIPPER_SETTLE_S)
+
+    # Lower platform from HEIGHT_5 down to HEIGHT_2 (table surface)
+    lift_enable(robot)
+    print(f"[MANIP] {label} — lower platform to table surface (HEIGHT_2)")
+    if not lift_to_height(robot, current_height, HEIGHT_2_STEPS):
+        print(f"[warn] {label} — lift failed to reach table surface")
+        robot.step_disable(LIFT_STEPPER)
+        robot.disable_servo(GRIPPER_SERVO)
+        return False, current_height
+    current_height = HEIGHT_2_STEPS
+
+    print(f"[MANIP] {label} — close gripper")
+    robot.set_servo(GRIPPER_SERVO, GRIPPER_CLOSE_DEG)
+    time.sleep(GRIPPER_SETTLE_S)
+
+    # Raise platform up to HEIGHT_5 (clearance)
+    print(f"[MANIP] {label} — raise platform to clearance height (HEIGHT_5)")
+    if not lift_to_height(robot, current_height, HEIGHT_5_STEPS):
+        print(f"[warn] {label} — lift failed to reach clearance height")
+        robot.step_disable(LIFT_STEPPER)
+        robot.disable_servo(GRIPPER_SERVO)
+        return False, current_height
+    current_height = HEIGHT_5_STEPS
+
+    robot.step_disable(LIFT_STEPPER)
+#    robot.disable_servo(GRIPPER_SERVO)
+
+    if cancel.is_set():
+        return False, current_height
+
+    print(f"[MOTION] {label} — step back {PICK_SIDE_OFFSET_MM:.0f} mm to line")
+    robot.move_backward(
+        distance=PICK_SIDE_OFFSET_MM,
+        velocity=DRIVE_VELOCITY_MM_S,
+        tolerance=DRIVE_TOLERANCE_MM,
+        blocking=True,
+    )
+
+    if cancel.is_set():
+        return False, current_height
+
+    print(f"[MOTION] {label} — turn right 90° (revert)")
+    robot.turn_by(delta_deg=-90.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
+
+    print(f"[MOTION] {label} pick complete")
+    return True, current_height
+
+
+def pick_p2(robot: Robot, cancel: CancelFlag, current_height: int) -> tuple[bool, int]:
+    """
+    P2 pick — platform is at HEIGHT_5 (clearance) on entry.
+
+    Sequence:
+      Turn left 90° → step forward →
+      lower to HEIGHT_3 (patty height) → open gripper →
+      lower to HEIGHT_2 (table surface) → close gripper →
+      raise to HEIGHT_5 (clearance) → step back → turn right 90°
+
+    Returns (success, new_current_height_steps).
+    """
+    label = "P2"
+
+    if cancel.is_set():
+        return False, current_height
+
+    print(f"[MOTION] {label} — turn left 90°")
+    robot.turn_by(delta_deg=90.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
+
+    if cancel.is_set():
+        return False, current_height
+
+    print(f"[MOTION] {label} — step {PICK_SIDE_OFFSET_MM:.0f} mm toward item")
+    robot.move_forward(
+        distance=PICK_SIDE_OFFSET_MM,
+        velocity=DRIVE_VELOCITY_MM_S,
+        tolerance=DRIVE_TOLERANCE_MM,
+        blocking=True,
+    )
+
+    if cancel.is_set():
+        return False, current_height
+
+    lift_enable(robot)
+
+    # Lower platform from HEIGHT_5 down to HEIGHT_3 (patty height) — gripper still open
+    print(f"[MANIP] {label} — lower platform to patty height (HEIGHT_3)")
+    if not lift_to_height(robot, current_height, HEIGHT_3_STEPS):
+        print(f"[warn] {label} — lift failed to reach patty height")
+        robot.step_disable(LIFT_STEPPER)
+        return False, current_height
+    current_height = HEIGHT_3_STEPS
+
+    # Open gripper at patty height before descending to table
+    robot.enable_servo(GRIPPER_SERVO)
+    print(f"[MANIP] {label} — open gripper at patty height")
+    robot.set_servo(GRIPPER_SERVO, GRIPPER_OPEN_DEG)
+    time.sleep(GRIPPER_SETTLE_S)
+
+    # Lower further from HEIGHT_3 down to HEIGHT_2 (table surface)
+    print(f"[MANIP] {label} — lower platform to table surface (HEIGHT_2)")
+    if not lift_to_height(robot, current_height, HEIGHT_2_STEPS):
+        print(f"[warn] {label} — lift failed to reach table surface")
+        robot.step_disable(LIFT_STEPPER)
+        robot.disable_servo(GRIPPER_SERVO)
+        return False, current_height
+    current_height = HEIGHT_2_STEPS
+
+    print(f"[MANIP] {label} — close gripper")
+    robot.set_servo(GRIPPER_SERVO, GRIPPER_CLOSE_DEG)
+    time.sleep(GRIPPER_SETTLE_S)
+
+    # Raise platform up to HEIGHT_5 (clearance)
+    print(f"[MANIP] {label} — raise platform to clearance height (HEIGHT_5)")
+    if not lift_to_height(robot, current_height, HEIGHT_5_STEPS):
+        print(f"[warn] {label} — lift failed to reach clearance height")
+        robot.step_disable(LIFT_STEPPER)
+        robot.disable_servo(GRIPPER_SERVO)
+        return False, current_height
+    current_height = HEIGHT_5_STEPS
+
+    robot.step_disable(LIFT_STEPPER)
+#    robot.disable_servo(GRIPPER_SERVO)
+
+    if cancel.is_set():
+        return False, current_height
+
+    print(f"[MOTION] {label} — step back {PICK_SIDE_OFFSET_MM:.0f} mm to line")
+    robot.move_backward(
+        distance=PICK_SIDE_OFFSET_MM,
+        velocity=DRIVE_VELOCITY_MM_S,
+        tolerance=DRIVE_TOLERANCE_MM,
+        blocking=True,
+    )
+
+    if cancel.is_set():
+        return False, current_height
+
+    print(f"[MOTION] {label} — turn right 90° (revert)")
+    robot.turn_by(delta_deg=-90.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
+
+    print(f"[MOTION] {label} pick complete")
+    return True, current_height
+
+
+def pick_p3(robot: Robot, cancel: CancelFlag, current_height: int) -> tuple[bool, int]:
+    """
+    P3 pick — platform is at HEIGHT_5 (clearance) on entry.
+
+    Sequence:
+      Turn left 90° → step forward →
+      lower to HEIGHT_4 (bun height) → open gripper →
+      lower to HEIGHT_2 (table surface) → close gripper →
+      raise to HEIGHT_5 (clearance) → step back → turn right 90°
+
+    Returns (success, new_current_height_steps).
+    """
+    label = "P3"
+
+    if cancel.is_set():
+        return False, current_height
+
+    print(f"[MOTION] {label} — turn left 90°")
+    robot.turn_by(delta_deg=90.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
+
+    if cancel.is_set():
+        return False, current_height
+
+    print(f"[MOTION] {label} — step {PICK_SIDE_OFFSET_MM:.0f} mm toward item")
+    robot.move_forward(
+        distance=PICK_SIDE_OFFSET_MM,
+        velocity=DRIVE_VELOCITY_MM_S,
+        tolerance=DRIVE_TOLERANCE_MM,
+        blocking=True,
+    )
+
+    if cancel.is_set():
+        return False, current_height
+
+    lift_enable(robot)
+
+    # Lower platform from HEIGHT_5 down to HEIGHT_4 (bun height) — gripper still open
+    print(f"[MANIP] {label} — lower platform to bun height (HEIGHT_4)")
+    if not lift_to_height(robot, current_height, HEIGHT_4_STEPS):
+        print(f"[warn] {label} — lift failed to reach bun height")
+        robot.step_disable(LIFT_STEPPER)
+        return False, current_height
+    current_height = HEIGHT_4_STEPS
+
+    # Open gripper at bun height before descending to table
+    robot.enable_servo(GRIPPER_SERVO)
+    print(f"[MANIP] {label} — open gripper at bun height")
+    robot.set_servo(GRIPPER_SERVO, GRIPPER_OPEN_DEG)
+    time.sleep(GRIPPER_SETTLE_S)
+
+    # Lower further from HEIGHT_4 down to HEIGHT_2 (table surface)
+    print(f"[MANIP] {label} — lower platform to table surface (HEIGHT_2)")
+    if not lift_to_height(robot, current_height, HEIGHT_2_STEPS):
+        print(f"[warn] {label} — lift failed to reach table surface")
+        robot.step_disable(LIFT_STEPPER)
+        robot.disable_servo(GRIPPER_SERVO)
+        return False, current_height
+    current_height = HEIGHT_2_STEPS
+
+    print(f"[MANIP] {label} — close gripper")
+    robot.set_servo(GRIPPER_SERVO, GRIPPER_CLOSE_DEG)
+    time.sleep(GRIPPER_SETTLE_S)
+
+    # Raise platform up to HEIGHT_5 (clearance)
+    print(f"[MANIP] {label} — raise platform to clearance height (HEIGHT_5)")
+    if not lift_to_height(robot, current_height, HEIGHT_5_STEPS):
+        print(f"[warn] {label} — lift failed to reach clearance height")
+        robot.step_disable(LIFT_STEPPER)
+        robot.disable_servo(GRIPPER_SERVO)
+        return False, current_height
+    current_height = HEIGHT_5_STEPS
+
+    robot.step_disable(LIFT_STEPPER)
+#    robot.disable_servo(GRIPPER_SERVO)
+
+    if cancel.is_set():
+        return False, current_height
+
+    print(f"[MOTION] {label} — step back {PICK_SIDE_OFFSET_MM:.0f} mm to line")
+    robot.move_backward(
+        distance=PICK_SIDE_OFFSET_MM,
+        velocity=DRIVE_VELOCITY_MM_S,
+        tolerance=DRIVE_TOLERANCE_MM,
+        blocking=True,
+    )
+
+    if cancel.is_set():
+        return False, current_height
+
+    print(f"[MOTION] {label} — turn right 90° (revert)")
+    robot.turn_by(delta_deg=-90.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
+
+    print(f"[MOTION] {label} pick complete")
+    return True, current_height
+
+
+# ---------------------------------------------------------------------------
+# Full pick sequence:  P1 → P2 → P3
+# ---------------------------------------------------------------------------
+
+def run_full_sequence(robot: Robot, cancel: CancelFlag) -> bool:
+    """
+    Platform starts at HEIGHT_1 (top). Before the first pick it descends
+    to HEIGHT_5 (clearance), then each pick routine handles its own
+    descent/ascent. After all picks the platform returns to HEIGHT_1.
+
+    Travel path:
+
+      Start (platform at HEIGHT_1)
+        │  forward DIST_START_TO_P1_MM
+        │  lower platform to HEIGHT_5
+        ▼
+       P1  ← open gripper, lower to HEIGHT_2, close, raise to HEIGHT_5
+        │  forward DIST_P1_TO_P2_MM
+        ▼
+       P2  ← lower to HEIGHT_3, open gripper, lower to HEIGHT_2, close, raise to HEIGHT_5
+        │  forward DIST_P2_TO_P3_MM
+        ▼
+       P3  ← lower to HEIGHT_4, open gripper, lower to HEIGHT_2, close, raise to HEIGHT_5
+        │
+        ▼  raise platform back to HEIGHT_1 (starting position)
+    """
+    current_height = HEIGHT_1_STEPS  # platform starts at the top
+
+    # ---- Drive to P1 -------------------------------------------------------
+    if cancel.is_set():
+        return False
+    print("[MOTION] drive forward to P1")
+    if not robot.move_forward(
+        distance=DIST_START_TO_P1_MM,
+        velocity=DRIVE_VELOCITY_MM_S,
+        tolerance=DRIVE_TOLERANCE_MM,
+        blocking=True,
+    ):
+        print("[warn] drive to P1 failed")
+        robot.stop()
+        return False
+
+    # Lower platform from HEIGHT_1 (top) down to HEIGHT_5 (clearance) before first pick
+    lift_enable(robot)
+    print("[MANIP] lower platform from starting position to clearance height (HEIGHT_5)")
+    if not lift_to_height(robot, current_height, HEIGHT_5_STEPS):
+        print("[warn] lift failed to reach clearance height")
+        robot.step_disable(LIFT_STEPPER)
+        return False
+    current_height = HEIGHT_5_STEPS
+    robot.step_disable(LIFT_STEPPER)
+
+    ok, current_height = pick_p1(robot, cancel, current_height)
+    if not ok:
+        return False
+
+    # ---- Drive forward to P2 -----------------------------------------------
+    if cancel.is_set():
+        return False
+    print("[MOTION] drive forward to P2")
+    if not robot.move_forward(
+        distance=DIST_P1_TO_P2_MM,
+        velocity=DRIVE_VELOCITY_MM_S,
+        tolerance=DRIVE_TOLERANCE_MM,
+        blocking=True,
+    ):
+        print("[warn] drive to P2 failed")
+        robot.stop()
+        return False
+
+    ok, current_height = pick_p2(robot, cancel, current_height)
+    if not ok:
+        return False
+
+    # ---- Drive forward to P3 -----------------------------------------------
+    if cancel.is_set():
+        return False
+    print("[MOTION] drive forward to P3")
+    if not robot.move_forward(
+        distance=DIST_P2_TO_P3_MM,
+        velocity=DRIVE_VELOCITY_MM_S,
+        tolerance=DRIVE_TOLERANCE_MM,
+        blocking=True,
+    ):
+        print("[warn] drive to P3 failed")
+        robot.stop()
+        return False
+
+    ok, current_height = pick_p3(robot, cancel, current_height)
+    if not ok:
+        return False
+
+    # ---- Return platform to starting position (HEIGHT_1 / top) ------------
+    lift_enable(robot)
+    print("[MANIP] raise platform back to starting position (HEIGHT_1)")
+    if not lift_to_height(robot, current_height, HEIGHT_1_STEPS):
+        print("[warn] lift failed to return to starting position")
+        robot.step_disable(LIFT_STEPPER)
+        return False
+    robot.step_disable(LIFT_STEPPER)
+    print("[MANIP] platform returned to starting position")
+
+    robot.stop()
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Main FSM loop
+# ---------------------------------------------------------------------------
 
 def run(robot: Robot) -> None:
     configure_robot(robot)
 
     state = "INIT"
-    drive_handle = None
-    last_status_print_at = 0.0
-
+    cancel = CancelFlag()
     period = 1.0 / float(DEFAULT_FSM_HZ)
     next_tick = time.monotonic()
 
     while True:
-        now = time.monotonic()
+
+        # --- BTN_2 pressed anywhere: immediately terminate the program -------
+        if robot.was_button_pressed(Button.BTN_2):
+            robot.stop()
+            robot.step_disable(LIFT_STEPPER)
+            robot.disable_servo(GRIPPER_SERVO)
+            show_idle_leds(robot)
+            print("[FSM] BTN_2 pressed — program terminated")
+            sys.exit(0)
 
         if state == "INIT":
             start_robot(robot)
-            reset_mission_pose(robot)
+            robot.reset_odometry()
+            if not robot.wait_for_odometry_reset(timeout=2.0):
+                print("[warn] odometry reset not confirmed; continuing")
+                robot.wait_for_pose_update(timeout=0.5)
             show_idle_leds(robot)
-            print("[FSM] IDLE — press BTN_1 to start blended path, BTN_2 to cancel")
-            print(
-                f"[CFG] velocity={VELOCITY_MM_S:.0f} mm/s  lookahead={LOOKAHEAD_MM:.0f} mm  "
-                f"tolerance={TOLERANCE_MM:.0f} mm  repulsion_range={REPULSION_RANGE_MM:.0f} mm"
-            )
-            if ENABLE_LIDAR:
-                print(
-                    f"[CFG] lidar mount=({LIDAR_MOUNT_X_MM:.0f}, {LIDAR_MOUNT_Y_MM:.0f}) mm "
-                    f"theta={LIDAR_MOUNT_THETA_DEG:.1f}° filter={LIDAR_RANGE_MIN_MM:.0f}-"
-                    f"{LIDAR_RANGE_MAX_MM:.0f} mm fov={LIDAR_FOV_DEG}"
-                )
-            if ENABLE_GPS:
-                print(
-                    f"[CFG] gps tag_id={TAG_ID}  "
-                    f"tag_body=({TAG_BODY_OFFSET_X_MM:.0f}, {TAG_BODY_OFFSET_Y_MM:.0f}) mm  "
-                    f"position_alpha={GPS_POSITION_ALPHA:.2f}"
-                )
-                if ENABLE_GPS_TANGENT_HEADING:
-                    print(
-                        f"[CFG] heading=gps_tangent  "
-                        f"alpha={GPS_TANGENT_ALPHA:.2f}  "
-                        f"min_displacement={GPS_TANGENT_MIN_DISPLACEMENT_MM:.0f} mm"
-                    )
-                else:
-                    print("[CFG] heading=imu")
+            print("[FSM] IDLE — platform must be at starting position (HEIGHT_1 / top)")
+            print("            press BTN_1 to start  |  BTN_2 to terminate program")
+            print(f"[CFG] pick order: P1 → P2 → P3  (always turn left to pick)")
+            print(f"[CFG] side offset: {PICK_SIDE_OFFSET_MM:.0f} mm")
+            print(f"[CFG] distances: start→P1={DIST_START_TO_P1_MM:.0f} mm  "
+                  f"P1→P2={DIST_P1_TO_P2_MM:.0f} mm  P2→P3={DIST_P2_TO_P3_MM:.0f} mm")
+            print(f"[CFG] gripper open={GRIPPER_OPEN_DEG:.0f}°  close={GRIPPER_CLOSE_DEG:.0f}°")
+            print(f"[CFG] HEIGHT_1={HEIGHT_1_STEPS} steps  HEIGHT_2={HEIGHT_2_STEPS} steps  "
+                  f"HEIGHT_3={HEIGHT_3_STEPS} steps  HEIGHT_4={HEIGHT_4_STEPS} steps  "
+                  f"HEIGHT_5={HEIGHT_5_STEPS} steps")
+            print(f"[CFG] lift max_vel={LIFT_MAX_VELOCITY} steps/s")
             state = "IDLE"
 
         elif state == "IDLE":
             if robot.was_button_pressed(Button.BTN_1):
-                reset_mission_pose(robot)
-                show_moving_leds(robot)
-                print(f"[FSM] MOVING (Blended) — {len(PATH_CONTROL_POINTS)} waypoints")
-                drive_handle = start_path(robot)
-                last_status_print_at = now
-                state = "MOVING"
+                show_running_leds(robot)
+                robot.reset_odometry()
+                if not robot.wait_for_odometry_reset(timeout=2.0):
+                    print("[warn] odometry reset not confirmed; continuing")
+                    robot.wait_for_pose_update(timeout=0.5)
+                cancel = CancelFlag()   # fresh flag for this run
+                print("[FSM] RUNNING full pick sequence — press BTN_2 to terminate")
+                state = "RUN_SEQUENCE"
 
-        elif state == "MOVING":
-            if robot.was_button_pressed(Button.BTN_2):
-                if drive_handle is not None:
-                    drive_handle.cancel()
-                    drive_handle.wait(timeout=1.0)
-                    drive_handle = None
-                robot.stop()
-                show_idle_leds(robot)
-                print("[FSM] IDLE — path cancelled")
+        elif state == "RUN_SEQUENCE":
+            ok = run_full_sequence(robot, cancel)
+            robot.stop()
+            robot.step_disable(LIFT_STEPPER)
+            robot.disable_servo(GRIPPER_SERVO)
+            show_idle_leds(robot)
+            if ok:
+                print("[FSM] SEQUENCE COMPLETE — press BTN_1 to run again")
+                print(" ")
                 state = "IDLE"
             else:
-                if now - last_status_print_at >= STATUS_PRINT_INTERVAL_S:
-                    print_status(robot)
-                    last_status_print_at = now
-                if drive_handle is not None and drive_handle.is_finished():
-                    print("[FSM] DONE — path complete")
-                    print_status(robot)
-                    drive_handle = None
-                    robot.stop()
-                    show_idle_leds(robot)
-                    print("[FSM] IDLE — press BTN_1 to run again")
-                    state = "IDLE"
+                print("[FSM] SEQUENCE FAILED — manually return the platform to HEIGHT_1,")
+                print("      then the robot will return to IDLE")
+                state = "INIT"
 
         next_tick += period
         sleep_s = next_tick - time.monotonic()
