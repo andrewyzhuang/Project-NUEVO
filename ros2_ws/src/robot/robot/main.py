@@ -76,17 +76,18 @@ TURN_TOLERANCE_DEG   = 2.0
 DIST_START_TO_P1_MM  = 1125.0
 DIST_P1_TO_P2_MM     = 150.0
 DIST_P2_TO_P3_MM     = 150.0
-PICK_SIDE_OFFSET_MM  = 30.0
+PICK_SIDE_OFFSET_MM  = 40.0
 
 # --- Path Planning (Vector Blended) ---
 ENABLE_LIDAR = True
 PATH_CONTROL_POINTS = [
     (0.0, 0.0, 240.0),
     (0.0, 2150.0, 240.0),
-    (550.0, 2150.0, 160.0),
-    (550.0, -600.0, 240.0),
-    (1300.0, -600.0, 240.0),
-    (1300.0, 2250.0, 360.0)
+    (530.0, 2150.0, 160.0),
+    (530.0, -700.0, 240.0),
+    (1300.0, -700.0, 240.0),
+    (1300.0, 1950.0, 360.0),
+    (1300.0, 2080.0, 160.0)
 ]
 VELOCITY_MM_S      = 150.0
 LOOKAHEAD_MM       = 150.0
@@ -95,6 +96,8 @@ ADVANCE_RADIUS_MM  = 100.0
 MAX_ANGULAR_RAD_S  = 0.6
 REPULSION_RANGE_MM = 450.0
 REPULSION_GAIN     = 600.0
+
+STATUS_PRINT_INTERVAL_S = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +140,10 @@ def show_idle_leds(robot: Robot) -> None:
     robot.set_led(LED.ORANGE, 200)
     robot.set_led(LED.GREEN, 0)
     robot.set_led(LED.BLUE, 0)
+
+def print_status(robot: Robot) -> None:
+    ox, oy, otheta = robot.get_odometry_pose()
+    print(f"  odom=({ox:6.0f}, {oy:6.0f}) mm  θ={otheta:5.1f}°")
 
 # --- Vision Helpers ---
 def find_traffic_light_color(robot: Robot) -> str | None:
@@ -235,12 +242,14 @@ def run(robot: Robot) -> None:
     state = "INIT"
     cancel = CancelFlag()
     drive_handle = None
+    last_status_print_at = 0.0
     detected_person = None
 
     period = 1.0 / float(DEFAULT_FSM_HZ)
     next_tick = time.monotonic()
 
     while True:
+        now = time.monotonic()
         # Global BTN_2 Cancel
         if robot.was_button_pressed(Button.BTN_2):
             if drive_handle is not None:
@@ -261,7 +270,7 @@ def run(robot: Robot) -> None:
             start_robot(robot)
             robot.reset_odometry()
             show_idle_leds(robot)
-            print("[FSM] READY - Press BTN_1 to commence full mission")
+            print("[FSM] READY - Press BTN_1 to commence buger building")
             state = "IDLE"
 
         elif state == "IDLE":
@@ -301,7 +310,7 @@ def run(robot: Robot) -> None:
 
         elif state == "START_NAVIGATION":
             print("[MOTION] Assembly complete. Resetting Odometry for Navigation.")
-            robot.turn_by(delta_deg=6.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
+            #robot.turn_by(delta_deg=6.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
             robot.reset_odometry()
             if not robot.wait_for_odometry_reset(timeout=2.0):
                 robot.wait_for_pose_update(timeout=0.5)
@@ -320,10 +329,13 @@ def run(robot: Robot) -> None:
             state = "NAVIGATING"
 
         elif state == "NAVIGATING":
+            if now - last_status_print_at >= STATUS_PRINT_INTERVAL_S:
+                    print_status(robot)
+                    last_status_print_at = now
             if drive_handle is not None and drive_handle.is_finished():
                 print("[MOTION] Path complete. Searching for person...")
                 drive_handle = None
-                robot.turn_by(-75.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG) # TODO: TUNE DEGREES
+                robot.turn_to(0.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
                 robot.stop()
                 state = "DETECT_PERSON"
 
@@ -332,19 +344,53 @@ def run(robot: Robot) -> None:
             if person in ("person_1", "person_2"):
                 detected_person = person
                 print(f"[VISION] Detected {detected_person}. Executing final approach.")
-                
-                state = "FINAL_DELIVERY"
+                robot.move_forward(760.0, velocity=DRIVE_VELOCITY_MM_S, tolerance=DRIVE_TOLERANCE_MM, blocking=True)
+                # 5) Turn right (-90 deg), move specific distance
+                robot.turn_to(-90.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
 
-        elif state == "FINAL_DELIVERY":
-            robot.move_forward(800.0, velocity=DRIVE_VELOCITY_MM_S, tolerance=DRIVE_TOLERANCE_MM, blocking=True)
-            # 5) Turn right (-90 deg), move specific distance
-            robot.turn_by(-90.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG) # TODO: TUNE DEGREES
+                state = "START_DELIVERY"
+
+        elif state == "START_DELIVERY":
+            print("[MOTION] Resetting Odometry for Delivery.")
+            robot.reset_odometry()
+            if not robot.wait_for_odometry_reset(timeout=2.0):
+                robot.wait_for_pose_update(timeout=0.5)
+            
             dist_to_platform = 2300.0 if detected_person == "person_1" else 2000.0
-            robot.move_forward(dist_to_platform, velocity=DRIVE_VELOCITY_MM_S, tolerance=DRIVE_TOLERANCE_MM, blocking=True)
 
-            # 6) Turn left (90 deg) to face platform, drop off
+            delivery_waypoints = [
+                (0.0, 0.0, 240.0),
+                (0.0, dist_to_platform, 240.0)
+            ]
+
+            drive_handle = robot.vector_blended_follow_path(
+                waypoints=delivery_waypoints,
+                velocity=VELOCITY_MM_S,
+                lookahead=LOOKAHEAD_MM,
+                tolerance=TOLERANCE_MM,
+                repulsion_range=REPULSION_RANGE_MM,
+                repulsion_gain=REPULSION_GAIN,
+                advance_radius=ADVANCE_RADIUS_MM,
+                max_angular_rad_s=MAX_ANGULAR_RAD_S,
+                blocking=False,
+            )
+            state = "DELIVERY"
+
+        elif state == "DELIVERY":
+            if now - last_status_print_at >= STATUS_PRINT_INTERVAL_S:
+                    print_status(robot)
+                    last_status_print_at = now
+            if drive_handle is not None and drive_handle.is_finished():
+                print("[MOTION] Path complete. Dropping off...")
+                drive_handle = None
+                robot.stop()
+                state = "DROPOFF"
+
+
+        elif state == "DROPOFF":
+            # Turn left (90 deg) to face platform, drop off
             robot.turn_by(90.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
-            robot.move_forward(distance=PICK_SIDE_OFFSET_MM, velocity=DRIVE_VELOCITY_MM_S, tolerance=DRIVE_TOLERANCE_MM, blocking=True)
+            #robot.move_forward(distance=PICK_SIDE_OFFSET_MM, velocity=DRIVE_VELOCITY_MM_S, tolerance=DRIVE_TOLERANCE_MM, blocking=True)
 
             print("[MANIP] Dropping off buger...")
             lift_enable(robot)
@@ -355,9 +401,9 @@ def run(robot: Robot) -> None:
             lift_to_height(robot, HEIGHT_2_STEPS, HEIGHT_1_STEPS)  # Raise to top
             robot.step_disable(LIFT_STEPPER)
 
-            robot.move_backward(distance=PICK_SIDE_OFFSET_MM, velocity=DRIVE_VELOCITY_MM_S, tolerance=DRIVE_TOLERANCE_MM, blocking=True)
+            #robot.move_backward(distance=PICK_SIDE_OFFSET_MM, velocity=DRIVE_VELOCITY_MM_S, tolerance=DRIVE_TOLERANCE_MM, blocking=True)
 
-            # 7) Turn right (-90 deg) to face course, move, wait, move
+            # Turn right (-90 deg) to face course, move, wait, move
             robot.turn_by(-90.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
             dist_final = 400.0 if detected_person == "person_1" else 700.0
             robot.move_forward(dist_final, velocity=DRIVE_VELOCITY_MM_S, tolerance=DRIVE_TOLERANCE_MM, blocking=True)
