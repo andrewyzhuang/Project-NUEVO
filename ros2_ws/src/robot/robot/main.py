@@ -76,18 +76,18 @@ TURN_TOLERANCE_DEG   = 2.0
 DIST_START_TO_P1_MM  = 1125.0
 DIST_P1_TO_P2_MM     = 150.0
 DIST_P2_TO_P3_MM     = 150.0
-PICK_SIDE_OFFSET_MM  = 60.0
+PICK_SIDE_OFFSET_MM  = 50.0
 
 # --- Path Planning (Vector Blended) ---
 ENABLE_LIDAR = True
 PATH_CONTROL_POINTS = [
     (0.0, 0.0, 240.0),
     (0.0, 2150.0, 240.0),
-    (530.0, 2150.0, 160.0),
-    (530.0, -550.0, 240.0),
+    (550.0, 2150.0, 160.0),
+    (550.0, -550.0, 240.0),
     (1300.0, -550.0, 240.0),
-    (1300.0, 2100.0, 360.0),
-    (1500.0, 2100.0, 240.0)
+    (1300.0, 2000.0, 360.0),
+    (1300.0, 2200.0, 160.0)
 ]
 VELOCITY_MM_S      = 150.0
 LOOKAHEAD_MM       = 150.0
@@ -198,7 +198,7 @@ def execute_pick(robot: Robot, cancel: CancelFlag, current_height: int, target_h
     return True, current_height
 
 def run_assembly_sequence(robot: Robot, cancel: CancelFlag) -> bool:
-    current_height = HEIGHT_1_STEPS
+    current_height = HEIGHT_2_STEPS
     
     # P1
     if not robot.move_forward(DIST_START_TO_P1_MM, DRIVE_VELOCITY_MM_S, DRIVE_TOLERANCE_MM, blocking=True): return False
@@ -219,9 +219,9 @@ def run_assembly_sequence(robot: Robot, cancel: CancelFlag) -> bool:
     ok, current_height = execute_pick(robot, cancel, current_height, HEIGHT_4_STEPS, "P3")
     if not ok: return False
 
-    # Return to Top
+    # Return to HEIGHT_2
     lift_enable(robot)
-    lift_to_height(robot, current_height, HEIGHT_1_STEPS)
+    lift_to_height(robot, current_height, HEIGHT_2_STEPS)
     robot.step_disable(LIFT_STEPPER)
     return True
 
@@ -269,10 +269,21 @@ def run(robot: Robot) -> None:
             if robot.was_button_pressed(Button.BTN_1):
                 cancel = CancelFlag()
                 robot.set_led(LED.GREEN, 255)
-                state = "AWAIT_TRAFFIC_LIGHT"
-                print("[MOTION] Turning 30 deg left to face traffic light...")
-                robot.turn_by(30.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
-                print("[VISION] Waiting for GREEN light...")
+                
+                # Lower platform from HEIGHT_1 → HEIGHT_5 before scanning
+                lift_enable(robot)
+                print("[MANIP] lower platform to HEIGHT_2 for scanning")
+                if not lift_to_height(robot, HEIGHT_1_STEPS, HEIGHT_2_STEPS):
+                    print("[warn] lift failed to reach HEIGHT_2 — returning to INIT")
+                    robot.step_disable(LIFT_STEPPER)
+                    show_idle_leds(robot)
+                    state = "INIT"
+                else:
+                    robot.step_disable(LIFT_STEPPER)
+                    print("[MOTION] Turning 30 deg left to face traffic light...")
+                    robot.turn_by(30.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
+                    print("[VISION] Waiting for GREEN light...")
+                    state = "AWAIT_TRAFFIC_LIGHT"
 
         elif state == "AWAIT_TRAFFIC_LIGHT":
             color = find_traffic_light_color(robot)
@@ -291,6 +302,7 @@ def run(robot: Robot) -> None:
 
         elif state == "START_NAVIGATION":
             print("[MOTION] Assembly complete. Resetting Odometry for Navigation.")
+            robot.turn_by(delta_deg=8.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
             robot.reset_odometry()
             if not robot.wait_for_odometry_reset(timeout=2.0):
                 robot.wait_for_pose_update(timeout=0.5)
@@ -316,41 +328,39 @@ def run(robot: Robot) -> None:
                 state = "DETECT_PERSON"
 
         elif state == "DETECT_PERSON":
+            robot.turn_by(-90.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG) # TODO: TUNE DEGREES
             person = scan_for_person(robot)
             if person in ("person_1", "person_2"):
                 detected_person = person
                 print(f"[VISION] Detected {detected_person}. Executing final approach.")
                 
-                # Setup LED indicator
-                if person == "person_1":
-                    robot.set_led(LED.GREEN, 255)
-                    robot.set_led(LED.BLUE, 0)
-                else:
-                    robot.set_led(LED.BLUE, 255)
-                    robot.set_led(LED.GREEN, 0)
-                
                 state = "FINAL_DELIVERY"
 
         elif state == "FINAL_DELIVERY":
+            robot.move_forward(800.0, velocity=DRIVE_VELOCITY_MM_S, tolerance=DRIVE_TOLERANCE_MM, blocking=True)
             # 5) Turn right (-90 deg), move specific distance
-            robot.turn_by(-90.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
-            dist_to_platform = 2000.0 if detected_person == "person_1" else 2400.0
+            robot.turn_by(-90.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG) # TODO: TUNE DEGREES
+            dist_to_platform = 2300.0 if detected_person == "person_1" else 2000.0
             robot.move_forward(dist_to_platform, velocity=DRIVE_VELOCITY_MM_S, tolerance=DRIVE_TOLERANCE_MM, blocking=True)
 
             # 6) Turn left (90 deg) to face platform, drop off
             robot.turn_by(90.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
+            robot.move_forward(distance=PICK_SIDE_OFFSET_MM, velocity=DRIVE_VELOCITY_MM_S, tolerance=DRIVE_TOLERANCE_MM, blocking=True)
+
             print("[MANIP] Dropping off burger...")
             lift_enable(robot)
-            lift_to_height(robot, HEIGHT_1_STEPS, HEIGHT_2_STEPS)  # Lower to table
+            #lift_to_height(robot, HEIGHT_1_STEPS, HEIGHT_2_STEPS)  # Lower to table
             robot.enable_servo(GRIPPER_SERVO)
             robot.set_servo(GRIPPER_SERVO, GRIPPER_OPEN_DEG)       # Open gripper
             time.sleep(GRIPPER_SETTLE_S)
             lift_to_height(robot, HEIGHT_2_STEPS, HEIGHT_1_STEPS)  # Raise to top
             robot.step_disable(LIFT_STEPPER)
 
+            robot.move_backward(distance=PICK_SIDE_OFFSET_MM, velocity=DRIVE_VELOCITY_MM_S, tolerance=DRIVE_TOLERANCE_MM, blocking=True)
+
             # 7) Turn right (-90 deg) to face course, move, wait, move
             robot.turn_by(-90.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
-            dist_final = 1000.0 if detected_person == "person_1" else 600.0
+            dist_final = 400.0 if detected_person == "person_1" else 700.0
             robot.move_forward(dist_final, velocity=DRIVE_VELOCITY_MM_S, tolerance=DRIVE_TOLERANCE_MM, blocking=True)
             
             print("[MOTION] Stopping for 2 seconds...")
