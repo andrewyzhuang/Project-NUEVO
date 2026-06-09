@@ -76,7 +76,7 @@ TURN_TOLERANCE_DEG   = 2.0
 DIST_START_TO_P1_MM  = 1125.0
 DIST_P1_TO_P2_MM     = 150.0
 DIST_P2_TO_P3_MM     = 150.0
-PICK_SIDE_OFFSET_MM  = 50.0
+PICK_SIDE_OFFSET_MM  = 30.0
 
 # --- Path Planning (Vector Blended) ---
 ENABLE_LIDAR = True
@@ -84,10 +84,9 @@ PATH_CONTROL_POINTS = [
     (0.0, 0.0, 240.0),
     (0.0, 2150.0, 240.0),
     (550.0, 2150.0, 160.0),
-    (550.0, -550.0, 240.0),
-    (1300.0, -550.0, 240.0),
-    (1300.0, 2000.0, 360.0),
-    (1300.0, 2200.0, 160.0)
+    (550.0, -600.0, 240.0),
+    (1300.0, -600.0, 240.0),
+    (1300.0, 2250.0, 360.0)
 ]
 VELOCITY_MM_S      = 150.0
 LOOKAHEAD_MM       = 150.0
@@ -219,9 +218,9 @@ def run_assembly_sequence(robot: Robot, cancel: CancelFlag) -> bool:
     ok, current_height = execute_pick(robot, cancel, current_height, HEIGHT_4_STEPS, "P3")
     if not ok: return False
 
-    # Return to HEIGHT_2
+    # Return to HEIGHT_3
     lift_enable(robot)
-    lift_to_height(robot, current_height, HEIGHT_2_STEPS)
+    lift_to_height(robot, current_height, HEIGHT_3_STEPS)
     robot.step_disable(LIFT_STEPPER)
     return True
 
@@ -280,8 +279,8 @@ def run(robot: Robot) -> None:
                     state = "INIT"
                 else:
                     robot.step_disable(LIFT_STEPPER)
-                    print("[MOTION] Turning 30 deg left to face traffic light...")
-                    robot.turn_by(30.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
+                    print("[MOTION] Turning 20 deg left to face traffic light...")
+                    robot.turn_by(20.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
                     print("[VISION] Waiting for GREEN light...")
                     state = "AWAIT_TRAFFIC_LIGHT"
 
@@ -289,11 +288,11 @@ def run(robot: Robot) -> None:
             color = find_traffic_light_color(robot)
             if color == "green":
                 print("[VISION] Green light detected! Turning back...")
-                robot.turn_by(-30.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
+                robot.turn_by(-20.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
                 state = "ASSEMBLY"
 
         elif state == "ASSEMBLY":
-            print("[MANIP] Starting Burger Assembly...")
+            print("[MANIP] Starting Buger Assembly...")
             success = run_assembly_sequence(robot, cancel)
             if success and not cancel.is_set():
                 state = "START_NAVIGATION"
@@ -302,7 +301,7 @@ def run(robot: Robot) -> None:
 
         elif state == "START_NAVIGATION":
             print("[MOTION] Assembly complete. Resetting Odometry for Navigation.")
-            robot.turn_by(delta_deg=8.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
+            robot.turn_by(delta_deg=6.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
             robot.reset_odometry()
             if not robot.wait_for_odometry_reset(timeout=2.0):
                 robot.wait_for_pose_update(timeout=0.5)
@@ -324,11 +323,11 @@ def run(robot: Robot) -> None:
             if drive_handle is not None and drive_handle.is_finished():
                 print("[MOTION] Path complete. Searching for person...")
                 drive_handle = None
+                robot.turn_by(-75.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG) # TODO: TUNE DEGREES
                 robot.stop()
                 state = "DETECT_PERSON"
 
         elif state == "DETECT_PERSON":
-            robot.turn_by(-90.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG) # TODO: TUNE DEGREES
             person = scan_for_person(robot)
             if person in ("person_1", "person_2"):
                 detected_person = person
@@ -347,9 +346,9 @@ def run(robot: Robot) -> None:
             robot.turn_by(90.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
             robot.move_forward(distance=PICK_SIDE_OFFSET_MM, velocity=DRIVE_VELOCITY_MM_S, tolerance=DRIVE_TOLERANCE_MM, blocking=True)
 
-            print("[MANIP] Dropping off burger...")
+            print("[MANIP] Dropping off buger...")
             lift_enable(robot)
-            #lift_to_height(robot, HEIGHT_1_STEPS, HEIGHT_2_STEPS)  # Lower to table
+            lift_to_height(robot, HEIGHT_3_STEPS, HEIGHT_2_STEPS)  # Lower to table
             robot.enable_servo(GRIPPER_SERVO)
             robot.set_servo(GRIPPER_SERVO, GRIPPER_OPEN_DEG)       # Open gripper
             time.sleep(GRIPPER_SETTLE_S)
