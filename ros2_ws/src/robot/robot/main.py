@@ -83,11 +83,11 @@ ENABLE_LIDAR = True
 PATH_CONTROL_POINTS = [
     (0.0, 0.0, 240.0),
     (0.0, 2150.0, 240.0),
-    (530.0, 2150.0, 160.0),
-    (530.0, -700.0, 240.0),
+    (520.0, 2150.0, 160.0),
+    (520.0, -700.0, 240.0),
     (1300.0, -700.0, 240.0),
     (1300.0, 1950.0, 360.0),
-    (1300.0, 2080.0, 160.0)
+    (1300.0, 2100.0, 160.0)
 ]
 VELOCITY_MM_S      = 150.0
 LOOKAHEAD_MM       = 150.0
@@ -344,7 +344,7 @@ def run(robot: Robot) -> None:
             if person in ("person_1", "person_2"):
                 detected_person = person
                 print(f"[VISION] Detected {detected_person}. Executing final approach.")
-                robot.move_forward(760.0, velocity=DRIVE_VELOCITY_MM_S, tolerance=DRIVE_TOLERANCE_MM, blocking=True)
+                robot.move_forward(720.0, velocity=DRIVE_VELOCITY_MM_S, tolerance=DRIVE_TOLERANCE_MM, blocking=True)
                 # 5) Turn right (-90 deg), move specific distance
                 robot.turn_to(-90.0, blocking=True, tolerance_deg=TURN_TOLERANCE_DEG)
 
