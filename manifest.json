@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "course": "MAE 162D/E",
+  "year": 2026,
+  "section": "Yen",
+  "group": 3,
+  "title": "HungrE",
+  "authors": ["Brianna Bayliss", "Angelina Yalda", "Thu Phung", "Julia Chen", "Xue Li Weng", "Andrew Huang"],
+  "summary": "A great creation",
+  "thumbnail": "assets/hungre.PNG",
+  "keywords": ["SLAM", "LiDAR", "Goes very fast","buger"]
+}
